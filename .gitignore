@@ -1,3 +1,26 @@
-venv
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc
+
+.pytest_cache/
+
+.venv/
+venv/
 My Strategy/venv
 trading_env
+
+logs/
+*.log
+
+master_scrip.csv
+
+node_modules/
+dist/
+
+.idea/
+.vscode/
+
+.DS_Store

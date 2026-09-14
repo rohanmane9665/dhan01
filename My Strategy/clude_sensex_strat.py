@@ -9,10 +9,9 @@ import csv
 from threading import Thread
 import queue
 import asyncio
-
 # --- 1. Your Dhan API Credentials ---
-CLIENT_ID = "1100996819"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzUzMDgzOTg2LCJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJ3ZWJob29rVXJsIjoiIiwiZGhhbkNsaWVudElkIjoiMTEwMDk5NjgxOSJ9.RSoA1tJmFIFGTB0-rHrykeu9am3H1LGe1YX4i4QiBKWE5RQW-W5Xm5H_a2ypncYdYpX6OtG2ASBRMUU7VeC4yA"
+CLIENT_ID = os.environ.get("DHAN_CLIENT_ID", "")
+ACCESS_TOKEN = os.environ.get("DHAN_ACCESS_TOKEN", "")
 
 # --- 2. Initialize the DhanHQ client ---
 try:
@@ -704,8 +703,8 @@ def emergency_close_position():
         print(f"CRITICAL ERROR in emergency close: {e}")
 
 # --- TELEGRAM BOT CONFIGURATION ---
-bot_token = '7381636685:AAHOrr6aD9GOJd4usAcK8FQM6BwD_EZq1Sc'
-receiver_chat_id = '6736587081'
+bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+receiver_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 def send_telegram_message(message):
     """Send message via Telegram bot"""

@@ -13,8 +13,8 @@ import numpy as np
 import talib
 
 # --- 1. Your Dhan API Credentials ---
-CLIENT_ID = "1100996819"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzU0NjczNDQ2LCJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJ3ZWJob29rVXJsIjoiIiwiZGhhbkNsaWVudElkIjoiMTEwMDk5NjgxOSJ9.cEwFste9eraelOYNFk7XFDJI4wEMm1qpu1kwYi9bN9n5mxb42UscaQmbrfHeq4MYl5cb8gzOHrrRa-elDumcRw"
+CLIENT_ID = os.environ.get("DHAN_CLIENT_ID", "")
+ACCESS_TOKEN = os.environ.get("DHAN_ACCESS_TOKEN", "")
 
 # --- 2. Initialize the DhanHQ client ---
 try:

@@ -1,0 +1,191 @@
+# Complete Setup Guide for SENSEX Trading Bot
+
+## 1. Prerequisites & Account Setup
+
+### A. Trading Account Requirements
+- **Dhan Trading Account**: Open a trading account with Dhan Securities
+- **API Access**: Enable API trading in your Dhan account
+- **Sufficient Balance**: Ensure adequate funds for option trading (minimum ₹50,000-1,00,000 recommended)
+
+### B. Python Environment
+```bash
+# Install required Python packages
+pip install pandas dhanhq requests
+```
+
+## 2. API Credentials Setup
+
+### A. Dhan API Credentials
+1. **Login to Dhan**: Go to Dhan web/app
+2. **API Section**: Navigate to Settings → API
+3. **Generate Credentials**:
+   - Client ID (your unique identifier)
+   - Access Token (for API authentication)
+4. **Replace in code**:
+   ```python
+   CLIENT_ID = "your_actual_client_id"
+   ACCESS_TOKEN = "your_actual_access_token"
+   ```
+
+### B. Telegram Bot Setup (Optional but Recommended)
+1. **Create Bot**:
+   - Open Telegram, search for @BotFather
+   - Send `/newbot` command
+   - Follow instructions to create bot
+   - Get Bot Token (looks like: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+2. **Get Chat ID**:
+   - Start chat with your bot
+   - Send any message
+   - Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+   - Find your chat ID in the response
+
+3. **Update code**:
+   ```python
+   TELEGRAM_BOT_TOKEN = "your_bot_token_here"
+   TELEGRAM_CHAT_ID = "your_chat_id_here"
+   ```
+
+## 3. Required Files
+
+### A. API Script Master CSV File
+**File Name**: `api-scrip-master.csv`
+**Location**: Same folder as your Python script
+
+**How to get this file**:
+1. **From Dhan**: Download from Dhan API documentation/resources
+2. **Typical URL**: Check Dhan's developer portal for master file
+3. **Manual Creation**: Create CSV with these columns:
+   ```csv
+   token,symbol,name,expiry,strike,lotsize,instrumenttype,exch_seg,tick_size
+   ```
+
+**Sample entries for SENSEX options**:
+```csv
+token,symbol,name,expiry,strike,lotsize,instrumenttype,exch_seg,tick_size
+12345,SENSEX09JUL2582000PE,SENSEX 09JUL25 82000 PE,2025-07-09,82000,20,OPTIDX,BSE_EQ,0.05
+12346,SENSEX09JUL2582100PE,SENSEX 09JUL25 82100 PE,2025-07-09,82100,20,OPTIDX,BSE_EQ,0.05
+```
+
+## 4. Configuration Parameters
+
+### A. Trading Parameters (Already in code)
+```python
+# These are correctly set in your code
+SENSEX_TRADING_SYMBOL = "SENSEX"
+SENSEX_SECURITY_ID = "1"
+EXCHANGE = "BSE"
+LOT_SIZE = 20
+```
+
+### B. Day-wise Trading Parameters
+The code has different parameters for each day:
+- **Monday**: 4 lots, Target1: 30, Target2: 45, SL: 25
+- **Tuesday**: 5 lots, Target1: 25, Target2: 45, SL: 25
+- **Wednesday**: 2 lots, Target1: 35, Target2: 45, SL: 25
+- **Thursday**: 3 lots, Target1: 35, Target2: 45, SL: 25
+- **Friday**: 4 lots, Target1: 30, Target2: 40, SL: 25
+
+## 5. Important Settings to Verify
+
+### A. Security IDs
+- **SENSEX Index**: Usually "1" (verify with Dhan)
+- **Option tokens**: Must match CSV file
+
+### B. Market Timings
+```python
+market_open = datetime_time(9, 15)    # 9:15 AM
+market_close = datetime_time(15, 30)  # 3:30 PM
+no_trade_time = datetime_time(15, 10) # No new trades after 3:10 PM
+```
+
+## 6. Risk Management & Testing
+
+### A. Paper Trading First
+- Test with small quantities initially
+- Verify all API calls work correctly
+- Check pattern recognition logic
+
+### B. Risk Controls
+- **Maximum Loss**: Set daily loss limits
+- **Position Size**: Don't risk more than 2% of capital per trade
+- **Stop Loss**: Always maintained at 25 points
+
+## 7. Pre-Launch Checklist
+
+### ✅ Account Setup
+- [ ] Dhan trading account active
+- [ ] API access enabled
+- [ ] Sufficient trading balance
+- [ ] Options trading permissions
+
+### ✅ Technical Setup
+- [ ] Python environment ready
+- [ ] All packages installed
+- [ ] API credentials configured
+- [ ] Telegram bot setup (optional)
+
+### ✅ Files & Data
+- [ ] `api-scrip-master.csv` file present
+- [ ] File has correct SENSEX option data
+- [ ] Trading symbols match current week's expiry
+
+### ✅ Code Configuration
+- [ ] CLIENT_ID updated
+- [ ] ACCESS_TOKEN updated
+- [ ] TELEGRAM credentials updated
+- [ ] Security IDs verified
+
+### ✅ Testing
+- [ ] API connection test
+- [ ] Pattern recognition test
+- [ ] Order placement test (small quantity)
+- [ ] Telegram notifications test
+
+## 8. Running the Code
+
+### A. Final Steps
+1. **Backup**: Keep backup of original code
+2. **Start Small**: Begin with minimum lots
+3. **Monitor**: Watch first few trades carefully
+4. **Logs**: Check console output for errors
+
+### B. Command to Run
+```bash
+python clude_sensex_strat.py
+```
+
+## 9. Common Issues & Solutions
+
+### A. CSV File Issues
+- **Problem**: Token not found
+- **Solution**: Update CSV with current week's option symbols
+
+### B. API Connection Issues
+- **Problem**: Authentication failed
+- **Solution**: Check credentials, ensure API is enabled
+
+### C. Order Failures
+- **Problem**: Orders not placed
+- **Solution**: Check balance, trading permissions, market hours
+
+## 10. Safety Warnings
+
+⚠️ **Important Disclaimers**:
+- This is algorithmic trading with real money
+- Always test thoroughly before live trading
+- Monitor positions manually as backup
+- Keep emergency stop procedures ready
+- Never risk more than you can afford to lose
+
+## 11. Support & Maintenance
+
+### A. Daily Tasks
+- Check CSV file for new expiry dates
+- Verify API credentials haven't expired
+- Review previous day's trades
+
+### B. Weekly Tasks
+- Update option symbols for new expiry
+- Review strategy performance
+- Adjust parameters if needed

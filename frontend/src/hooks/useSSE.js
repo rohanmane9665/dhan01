@@ -15,7 +15,8 @@ export function useSSE() {
 
     function connect() {
       if (cancelled) return;
-      const es = new EventSource('http://localhost:8000/api/v1/stream/events');
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+      const es = new EventSource(`${baseUrl}/stream/events`);
       esRef.current = es;
 
       es.onopen = () => {

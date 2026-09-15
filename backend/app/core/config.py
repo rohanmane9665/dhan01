@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dhan_algo"
     REDIS_URL: str = "redis://localhost:6379/0"
+    FRONTEND_URL: str = "http://localhost:5173"
 
     MARKET_DATA_STALE_SECONDS: int = 3
 

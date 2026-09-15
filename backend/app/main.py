@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, trading, positions, streaming, analytics, risk, logs
+from app.api.routes import health, trading, positions, streaming, analytics, risk, logs, auth_routes
+from app.api.auth import verify_admin_token
+from fastapi import Depends
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.database.database import engine, Base
@@ -57,9 +59,11 @@ app.add_middleware(
 )
 
 app.include_router(health.router, tags=["health"])
-app.include_router(trading.router, prefix="/api/v1/trading", tags=["trading"])
-app.include_router(positions.router, prefix="/api/v1/positions", tags=["positions"])
-app.include_router(streaming.router, prefix="/api/v1/stream", tags=["streaming"])
-app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
-app.include_router(risk.router, prefix="/api/v1/risk", tags=["risk"])
-app.include_router(logs.router, prefix="/api/v1/logs", tags=["logs"])
+app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["auth"])
+
+app.include_router(trading.router, prefix="/api/v1/trading", tags=["trading"], dependencies=[Depends(verify_admin_token)])
+app.include_router(positions.router, prefix="/api/v1/positions", tags=["positions"], dependencies=[Depends(verify_admin_token)])
+app.include_router(streaming.router, prefix="/api/v1/stream", tags=["streaming"], dependencies=[Depends(verify_admin_token)])
+app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"], dependencies=[Depends(verify_admin_token)])
+app.include_router(risk.router, prefix="/api/v1/risk", tags=["risk"], dependencies=[Depends(verify_admin_token)])
+app.include_router(logs.router, prefix="/api/v1/logs", tags=["logs"], dependencies=[Depends(verify_admin_token)])

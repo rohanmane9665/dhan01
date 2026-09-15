@@ -8,25 +8,38 @@ import RiskControls  from './pages/RiskControls';
 import Strategy      from './pages/Strategy';
 import AIInsights    from './pages/AIInsights';
 import Logs          from './pages/Logs';
+import Login         from './pages/Login';
+import ProtectedRoute from './components/ProtectedRoute';
+import { AuthProvider } from './context/AuthContext';
 
 function App() {
   return (
-    <Router>
-      <div className="min-h-screen bg-gray-950 text-gray-100">
-        <DashboardLayout>
+    <AuthProvider>
+      <Router>
+        <div className="min-h-screen bg-gray-950 text-gray-100">
           <Routes>
-            <Route path="/"             element={<Dashboard />} />
-            <Route path="/live-trading" element={<LiveTrading />} />
-            <Route path="/analytics"    element={<Analytics />} />
-            <Route path="/risk"         element={<RiskControls />} />
-            <Route path="/strategy"     element={<Strategy />} />
-            <Route path="/ai-insights"  element={<AIInsights />} />
-            <Route path="/logs"         element={<Logs />} />
-            <Route path="*"             element={<Navigate to="/" replace />} />
+            <Route path="/login" element={<Login />} />
+            
+            <Route path="*" element={
+              <ProtectedRoute>
+                <DashboardLayout>
+                  <Routes>
+                    <Route path="/"             element={<Dashboard />} />
+                    <Route path="/live-trading" element={<LiveTrading />} />
+                    <Route path="/analytics"    element={<Analytics />} />
+                    <Route path="/risk"         element={<RiskControls />} />
+                    <Route path="/strategy"     element={<Strategy />} />
+                    <Route path="/ai-insights"  element={<AIInsights />} />
+                    <Route path="/logs"         element={<Logs />} />
+                    <Route path="*"             element={<Navigate to="/" replace />} />
+                  </Routes>
+                </DashboardLayout>
+              </ProtectedRoute>
+            } />
           </Routes>
-        </DashboardLayout>
-      </div>
-    </Router>
+        </div>
+      </Router>
+    </AuthProvider>
   );
 }
 

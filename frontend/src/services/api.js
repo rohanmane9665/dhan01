@@ -8,6 +8,17 @@ const api = axios.create({
   timeout: 8000,
 });
 
+// Add a request interceptor to attach the auth token
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('api_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
 // ── Trading Control ──────────────────────────────────────────────────────────
 export const getStatus      = ()         => api.get('/trading/status').then(r => r.data);
 export const setMode        = (mode)     => api.post('/trading/mode', { mode }).then(r => r.data);

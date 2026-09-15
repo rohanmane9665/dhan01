@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, BarChart2, Shield, Settings, List, TrendingUp, AlertTriangle, Cpu, FileText } from 'lucide-react';
+import { Activity, BarChart2, Shield, Settings, List, TrendingUp, AlertTriangle, Cpu, FileText, LogOut } from 'lucide-react';
 import { getStatus, setMode, triggerKill, resetKill } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 const SidebarItem = ({ icon: Icon, label, path, active }) => (
   <Link to={path} className={`flex items-center gap-3 px-4 py-3 cursor-pointer rounded-lg mb-1 transition-colors ${active ? 'bg-blue-600/20 text-blue-400' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}>
@@ -13,6 +14,7 @@ const SidebarItem = ({ icon: Icon, label, path, active }) => (
 const DashboardLayout = ({ children }) => {
   const location = useLocation();
   const currentPath = location.pathname;
+  const { logout } = useAuth();
   
   const [tradingMode, setTradingMode] = useState('PAPER');
   const [systemStatus, setSystemStatus] = useState('LOADING');
@@ -86,12 +88,18 @@ const DashboardLayout = ({ children }) => {
           <SidebarItem icon={FileText}    label="Logs"          path="/logs"         active={currentPath === '/logs'} />
         </div>
         
-        <div className="p-4 border-t border-gray-800">
+        <div className="p-4 border-t border-gray-800 space-y-2">
            <button 
              onClick={handleKillSwitch}
              className="w-full py-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded hover:bg-red-500/20 font-bold flex items-center justify-center gap-2 transition-colors">
               <Shield size={18} />
               KILL SWITCH
+           </button>
+           <button 
+             onClick={logout}
+             className="w-full py-2 text-gray-400 hover:text-white border border-transparent hover:border-gray-700 rounded hover:bg-gray-800 flex items-center justify-center gap-2 transition-colors">
+              <LogOut size={18} />
+              Log Out
            </button>
         </div>
       </div>

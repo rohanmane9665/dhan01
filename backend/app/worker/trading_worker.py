@@ -37,6 +37,7 @@ from app.execution.engine import ExecutionEngine
 from app.execution.position_manager import PositionManager
 from app.reconciliation.service import ReconciliationService
 from app.scheduler.market_calendar import MarketCalendar
+from app.market.instruments import InstrumentManager
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -66,6 +67,7 @@ class TradingWorker:
         self.strategy = OptionRSIStrategy(rsi_period=14, signal_gap_minutes=15)
         self.reconciliation = ReconciliationService(self.broker, self.position_manager)
         self.calendar = MarketCalendar()
+        self.instrument_manager = InstrumentManager()
 
         # Latest market snapshot (published to Redis for frontend)
         self._latest_sensex: float = 0.0
@@ -89,6 +91,9 @@ class TradingWorker:
         from app.database.database import AsyncSessionLocal
         from app.database.repositories import PositionRepository, EventRepository
         from app.execution.position_manager import Position
+
+        # Load latest instruments
+        await self.instrument_manager.load_master()
 
         async with AsyncSessionLocal() as session:
             pos_repo = PositionRepository(session)
@@ -196,7 +201,12 @@ class TradingWorker:
 
         atm_strike = _atm_strike(self._latest_sensex)
         option_ltp = self._latest_ce_ltp if option_type == "CE" else self._latest_pe_ltp
-        security_id = _build_security_id(atm_strike, option_type)
+        
+        # Resolve real security ID
+        security_id = self.instrument_manager.get_security_id("SENSEX", float(atm_strike), option_type)
+        if not security_id:
+            logger.error(f"Could not resolve security ID for SENSEX {atm_strike} {option_type}. Defaulting to dummy ID.")
+            security_id = f"SENSEX_{atm_strike}_{option_type}"
 
         market_data = {
             "sensex_price": self._latest_sensex,
@@ -312,14 +322,10 @@ class TradingWorker:
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
 # ------------------------------------------------------------------ #
+# ------------------------------------------------------------------ #
 def _atm_strike(sensex_price: float) -> int:
     """Round SENSEX up to nearest 100 multiple (matches legacy strategy)."""
     return math.ceil(sensex_price / 100) * 100
-
-
-def _build_security_id(strike: int, option_type: str) -> str:
-    """Placeholder — real security_id must be looked up from instruments CSV."""
-    return f"SENSEX_{strike}_{option_type}"
 
 
 # Module-level singleton (created in main.py startup)

@@ -30,6 +30,7 @@ def test_legacy_rsi_breakout_exact_match():
     Legacy SL: Low[-2]
     """
     strategy = OptionRSIStrategy(rsi_period=14, signal_gap_minutes=0)
+    strategy.no_fresh_trade_time = time(23, 59)
     
     # We mock calculate_rsi to return exact values to isolate the logic testing
     strategy.calculate_rsi = lambda closes: np.array(

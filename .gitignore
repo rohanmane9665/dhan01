@@ -24,3 +24,6 @@ dist/
 .vscode/
 
 .DS_Store
+
+credentials
+secrets

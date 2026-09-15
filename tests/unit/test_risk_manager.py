@@ -3,8 +3,10 @@ from datetime import datetime
 from app.risk.manager import RiskManager
 from app.strategies.models import Signal
 
+from app.risk.kill_switch import KillSwitch
+
 def test_kill_switch():
-    rm = RiskManager()
+    rm = RiskManager(kill_switch=KillSwitch())
     signal = Signal(
         strategy_id="test", symbol="test CE", security_id="123", option_type="CE",
         direction="BUY", quantity=10, entry_reference=100.0, stop_loss_reference=90.0,
@@ -19,7 +21,7 @@ def test_kill_switch():
     assert rm.evaluate_signal(signal)[0] == False
     
 def test_max_daily_loss():
-    rm = RiskManager()
+    rm = RiskManager(kill_switch=KillSwitch())
     rm.current_daily_pnl = -5001.0
     
     signal = Signal(

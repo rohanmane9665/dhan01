@@ -28,40 +28,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
 
-    # Create the trading worker (uses PaperBrokerAdapter by default)
-    trading_mode = settings.TRADING_MODE if settings else "PAPER"
-    if trading_mode == "LIVE" and settings and settings.ENABLE_LIVE_TRADING:
-        from app.dhan.adapter import DhanAdapter
-        broker = DhanAdapter()
-        logger.info("🔴 LIVE trading mode selected.")
-    else:
-        from app.dhan.adapter import PaperBrokerAdapter
-        broker = PaperBrokerAdapter()
-        logger.info("📄 PAPER trading mode selected.")
-
-    worker = TradingWorker(broker)
-    set_worker(worker)
-    await worker.start()
-
-    # Start MarketFeed
-    from app.market.feed import MarketFeed
-    feed = MarketFeed()
-    await feed.start()
-
-    # Start market session scheduler (09:15 open, 15:25 force-close)
-    sched = start_scheduler(worker)
-
-    # Attach feed to app state for clean shutdown
-    app.state.feed = feed
+    # Worker is now run in a separate process via worker_main.py
+    # API just serves requests and reads from DB/Redis
 
     yield
 
     # Shutdown
-    stop_scheduler()
-    logger.info("Shutting down MarketFeed...")
-    await app.state.feed.stop()
-    logger.info("Shutting down TradingWorker...")
-    await worker.stop()
     logger.info("✅ Shutdown complete.")
 
 

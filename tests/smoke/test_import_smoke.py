@@ -15,7 +15,8 @@ def test_import_config():
 
 def test_import_risk_manager():
     from app.risk.manager import RiskManager
-    rm = RiskManager()
+    from app.risk.kill_switch import KillSwitch
+    rm = RiskManager(kill_switch=KillSwitch())
     assert not rm.kill_switch_active
 
 

@@ -19,6 +19,7 @@ from app.execution.position_manager import PositionManager
 from app.market.candle_engine import CandleEngine
 from app.market.validator import DataValidator
 from app.risk.manager import RiskManager
+from app.risk.kill_switch import KillSwitch
 from app.strategies.option_rsi import OptionRSIStrategy
 from app.strategies.models import Signal
 
@@ -131,12 +132,15 @@ async def test_risk_manager_blocks_on_kill_switch():
     broker = PaperBrokerAdapter()
     await broker.connect()
 
-    rm = RiskManager()
-    pm = PositionManager()
-    engine = ExecutionEngine(broker_adapter=broker, risk_manager=rm, position_manager=pm)
+    # Mock DB calls to avoid ConnectionRefusedError during execution engine logging
+    from unittest.mock import patch
+    with patch("app.execution.engine.AsyncSessionLocal"):
+        rm = RiskManager(kill_switch=KillSwitch())
+        pm = PositionManager()
+        engine = ExecutionEngine(broker_adapter=broker, risk_manager=rm, position_manager=pm)
 
-    # Activate kill switch
-    await rm.activate_kill_switch("Test: kill switch block")
+    # Activate kill switch directly to bypass DB logging in test
+    rm.kill_switch.trigger("Test: kill switch block")
 
     dummy_signal = Signal(
         strategy_id="test",

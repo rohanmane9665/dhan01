@@ -1,5 +1,5 @@
+import json
 from fastapi import APIRouter, Body, HTTPException
-from app.worker.trading_worker import get_worker
 from app.core.redis import redis_client
 
 router = APIRouter()
@@ -8,12 +8,18 @@ router = APIRouter()
 @router.get("/status")
 async def get_status():
     """Returns current trading mode and system status."""
-    worker = get_worker()
     mode = await redis_client.get("trading_mode") or "PAPER"
     system_status = await redis_client.get("system_status") or "RUNNING"
-
-    if worker and worker.risk_manager.kill_switch_active:
-        system_status = "KILLED"
+    
+    # Check if kill switch is active from the latest market snapshot
+    snapshot_str = await redis_client.get("market_snapshot")
+    if snapshot_str:
+        try:
+            snapshot = json.loads(snapshot_str)
+            if snapshot.get("kill_switch"):
+                system_status = "KILLED"
+        except Exception:
+            pass
 
     return {"status": system_status, "mode": mode}
 
@@ -30,31 +36,29 @@ async def set_mode(mode: str = Body(..., embed=True)):
 @router.post("/kill")
 async def kill_switch():
     """Emergency kill switch — immediately blocks all new trades."""
-    worker = get_worker()
-    if worker:
-        await worker.risk_manager.activate_kill_switch("Operator triggered via dashboard")
-    return {"message": "🚨 Emergency kill switch activated. All new trading blocked.", "status": "KILLED"}
+    await redis_client.publish("trading_commands", json.dumps({
+        "command": "kill",
+        "reason": "Operator triggered via dashboard"
+    }))
+    return {"message": "🚨 Emergency kill switch signal sent. All new trading blocked.", "status": "KILLED_PENDING"}
 
 
 @router.post("/reset-kill")
 async def reset_kill():
     """Reset the kill switch. Trading resumes on next valid signal."""
-    worker = get_worker()
-    if worker:
-        await worker.risk_manager.reset_kill_switch("Dashboard Operator")
-    return {"message": "✅ Kill switch reset. System monitoring for new signals.", "status": "RUNNING"}
+    await redis_client.publish("trading_commands", json.dumps({
+        "command": "reset_kill",
+        "reason": "Dashboard Operator"
+    }))
+    return {"message": "✅ Kill switch reset signal sent. System monitoring for new signals.", "status": "RUNNING_PENDING"}
 
 
 @router.post("/close-position/{position_id}")
 async def close_position(position_id: str):
     """Manually close a specific open position at market price."""
-    worker = get_worker()
-    if not worker:
-        raise HTTPException(status_code=503, detail="Trading worker not available")
+    await redis_client.publish("trading_commands", json.dumps({
+        "command": "close_position",
+        "position_id": position_id
+    }))
+    return {"message": f"Close position signal sent for {position_id}"}
 
-    pos = worker.position_manager.active_positions.get(position_id)
-    if not pos:
-        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
-
-    result = await worker.execution_engine.close_position(position_id, pos.current_price)
-    return result

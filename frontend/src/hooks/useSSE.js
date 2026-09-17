@@ -16,7 +16,10 @@ export function useSSE() {
     function connect() {
       if (cancelled) return;
       const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-      const es = new EventSource(`${baseUrl}/stream/events`);
+      const token = localStorage.getItem('api_token');
+      const url = token ? `${baseUrl}/stream/events?token=${token}` : `${baseUrl}/stream/events`;
+      
+      const es = new EventSource(url);
       esRef.current = es;
 
       es.onopen = () => {

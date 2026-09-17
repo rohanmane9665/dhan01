@@ -115,6 +115,12 @@ class OptionRSIStrategy(BaseStrategy):
 
         pattern_met = cond1 and cond2 and cond3
         reason = f"RSI[-4]:{rsi_4:.2f}, RSI[-3]:{rsi_3:.2f}, RSI[-2]:{rsi_2:.2f}"
+        
+        logger.info(f"RSI[-4] ({rsi_4:.2f}) < 59.99: C1 = {cond1}")
+        logger.info(f"RSI[-3] ({rsi_3:.2f}) < 59.99: C2 = {cond2}")
+        logger.info(f"RSI[-2] ({rsi_2:.2f}) > 59.99: C3 = {cond3}")
+        logger.info(f"All RSI conditions met: {pattern_met}")
+        
         return pattern_met, reason
 
     def evaluate(self, market_data: Dict[str, Any]) -> Optional[Signal]:
@@ -150,7 +156,11 @@ class OptionRSIStrategy(BaseStrategy):
         # Check Breakout Condition: Current Option Price > iloc[-2] High
         option_ltp = market_data.get("option_ltp", 0.0)
         iloc_2_high = option_df.iloc[-2]["high"]
-        if option_ltp <= iloc_2_high:
+        
+        breakout_met = option_ltp > iloc_2_high
+        logger.info(f"Breakout Check: Option LTP ({option_ltp:.2f}) > Candle[-2] High ({iloc_2_high:.2f}): {breakout_met}")
+        
+        if not breakout_met:
             return None
 
         # Calculate Initial Stop Loss from iloc[-2] Low

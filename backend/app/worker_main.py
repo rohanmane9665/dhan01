@@ -158,9 +158,6 @@ async def main():
     set_worker(worker)
     await worker.start()
 
-    # Seed candles from historical intraday data
-    await worker.seed_candles()
-
     # Resolve instruments for the MarketFeed
     instruments, type_map = await resolve_instruments(worker)
 
@@ -169,6 +166,17 @@ async def main():
     for sec_id, tick_type in type_map.items():
         feed.set_instrument_type(sec_id, tick_type)
     await feed.start(instruments if instruments else None)
+
+    # Wait for SENSEX price to populate from live market feed before seeding
+    if worker._latest_sensex <= 0:
+        logger.info("⏳ Waiting for SENSEX price from market feed before seeding candles...")
+        for _ in range(15):
+            if worker._latest_sensex > 0:
+                break
+            await asyncio.sleep(1)
+
+    # Seed candles from historical intraday data
+    await worker.seed_candles()
 
     # Start scheduler
     start_scheduler(worker)

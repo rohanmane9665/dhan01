@@ -48,38 +48,40 @@ class DhanClient:
         except Exception as e:
             logger.error(f"Failed to initialize dhanhq: {e}")
 
-    async def _run_async(self, func, *args, **kwargs):
+    async def _run_async(self, method_name: str, *args, **kwargs):
         """Helper to run blocking dhanhq calls in a thread pool."""
         if not self.dhan:
             self.initialize()
         if not self.dhan:
             return {"status": "failure", "remarks": "Dhan client not initialized"}
+        
+        func = getattr(self.dhan, method_name)
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
     # ── Account & Funds ────────────────────────────────────────────────
     async def get_fund_limits(self) -> Dict[str, Any]:
         """Get account fund limits: balance, margin, collateral."""
-        return await self._run_async(self.dhan.get_fund_limits)
+        return await self._run_async("get_fund_limits")
 
     # ── Positions & Orders ─────────────────────────────────────────────
     async def get_positions(self) -> Dict[str, Any]:
         """Get all open positions for the day."""
-        return await self._run_async(self.dhan.get_positions)
+        return await self._run_async("get_positions")
 
     async def get_orders(self) -> Dict[str, Any]:
         """Get all orders placed today."""
-        return await self._run_async(self.dhan.get_order_list)
+        return await self._run_async("get_order_list")
 
     async def get_holdings(self) -> Dict[str, Any]:
         """Get portfolio holdings (equity delivery)."""
-        return await self._run_async(self.dhan.get_holdings)
+        return await self._run_async("get_holdings")
 
     async def get_trade_book(self, order_id: Optional[str] = None) -> Dict[str, Any]:
         """Get trade book (executed trades). Optionally filter by order_id."""
         if order_id:
-            return await self._run_async(self.dhan.get_trade_book, order_id)
-        return await self._run_async(self.dhan.get_trade_book)
+            return await self._run_async("get_trade_book", order_id)
+        return await self._run_async("get_trade_book")
 
     # ── Order Management ───────────────────────────────────────────────
     async def place_order(
@@ -95,7 +97,7 @@ class DhanClient:
     ) -> Dict[str, Any]:
         """Place a new order."""
         return await self._run_async(
-            self.dhan.place_order,
+            "place_order",
             security_id=str(security_id),
             exchange_segment=exchange_segment,
             transaction_type=transaction_type,
@@ -117,7 +119,7 @@ class DhanClient:
     ) -> Dict[str, Any]:
         """Modify an existing order."""
         return await self._run_async(
-            self.dhan.modify_order,
+            "modify_order",
             order_id=order_id,
             order_type=order_type,
             quantity=int(quantity),
@@ -128,7 +130,7 @@ class DhanClient:
 
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         """Cancel an existing order."""
-        return await self._run_async(self.dhan.cancel_order, order_id=order_id)
+        return await self._run_async("cancel_order", order_id=order_id)
 
     # ── Market Data: REST Snapshots ────────────────────────────────────
     async def ticker_data(self, securities: Dict[str, List[int]]) -> Dict[str, Any]:
@@ -136,21 +138,21 @@ class DhanClient:
         Get latest LTP (Last Traded Price) for given securities.
         securities format: {"BSE_FNO": [12345, 67890], "NSE_EQ": [1333]}
         """
-        return await self._run_async(self.dhan.ticker_data, securities=securities)
+        return await self._run_async("ticker_data", securities=securities)
 
     async def ohlc_data(self, securities: Dict[str, List[int]]) -> Dict[str, Any]:
         """
         Get OHLC + LTP data for given securities.
         securities format: {"BSE_FNO": [12345], "IDX_I": [51]}
         """
-        return await self._run_async(self.dhan.ohlc_data, securities=securities)
+        return await self._run_async("ohlc_data", securities=securities)
 
     async def quote_data(self, securities: Dict[str, List[int]]) -> Dict[str, Any]:
         """
         Get full market depth, OHLC, volume, OI, LTP.
         securities format: {"BSE_FNO": [12345]}
         """
-        return await self._run_async(self.dhan.quote_data, securities=securities)
+        return await self._run_async("quote_data", securities=securities)
 
     # ── Market Data: Historical ────────────────────────────────────────
     async def historical_daily_data(
@@ -167,7 +169,7 @@ class DhanClient:
         from_date, to_date format: "YYYY-MM-DD"
         """
         return await self._run_async(
-            self.dhan.historical_daily_data,
+            "historical_daily_data",
             security_id,
             exchange_segment,
             instrument_type,
@@ -191,7 +193,7 @@ class DhanClient:
         interval: candle interval in minutes (default 1)
         """
         return await self._run_async(
-            self.dhan.intraday_minute_data,
+            "intraday_minute_data",
             str(security_id),
             exchange_segment,
             instrument_type,

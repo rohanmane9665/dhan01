@@ -137,6 +137,51 @@ class TradingWorker:
 
         await self._publish_status("RUNNING")
         logger.info("✅ TradingWorker running.")
+        
+        # Start the periodic status logger
+        self._status_logger_task = asyncio.create_task(self._log_status_periodic())
+
+    async def _log_status_periodic(self):
+        """Periodically logs the real-time condition status exactly like the original strategy."""
+        while self._running:
+            try:
+                logger.info(f"\n{'='*60}\nCONDITION STATUS - {datetime.now(IST).strftime('%H:%M:%S')}\n{'='*60}")
+                
+                # Check PE
+                pe_df = self.pe_engine.get_dataframe()
+                if not pe_df.empty and len(pe_df) >= 4:
+                    closes = pe_df['close'].values
+                    rsi = self.strategy.calculate_rsi(closes)
+                    if rsi is not None and len(rsi) >= 4:
+                        logger.info(f"PE RSI: [-4]:{rsi[-4]:.2f} [-3]:{rsi[-3]:.2f} [-2]:{rsi[-2]:.2f} [-1]:{rsi[-1]:.2f}")
+                        c1 = rsi[-4] < 59.99
+                        c2 = rsi[-3] < 59.99
+                        c3 = rsi[-2] > 59.99
+                        logger.info(f"PE Conditions: C1:{c1} C2:{c2} C3:{c3}")
+                else:
+                    logger.info("PE: Not enough data")
+                    
+                # Check CE
+                ce_df = self.ce_engine.get_dataframe()
+                if not ce_df.empty and len(ce_df) >= 4:
+                    closes = ce_df['close'].values
+                    rsi = self.strategy.calculate_rsi(closes)
+                    if rsi is not None and len(rsi) >= 4:
+                        logger.info(f"CE RSI: [-4]:{rsi[-4]:.2f} [-3]:{rsi[-3]:.2f} [-2]:{rsi[-2]:.2f} [-1]:{rsi[-1]:.2f}")
+                        c1 = rsi[-4] < 59.99
+                        c2 = rsi[-3] < 59.99
+                        c3 = rsi[-2] > 59.99
+                        logger.info(f"CE Conditions: C1:{c1} C2:{c2} C3:{c3}")
+                else:
+                    logger.info("CE: Not enough data")
+                    
+                logger.info(f"SENSEX: {self._latest_sensex}, PE Price: {self._latest_pe_ltp}, CE Price: {self._latest_ce_ltp}")
+                logger.info(f"{'='*60}\n")
+                
+            except Exception as e:
+                logger.error(f"Error in periodic status logger: {e}")
+                
+            await asyncio.sleep(30)
 
     async def stop(self):
         self._running = False

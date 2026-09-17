@@ -39,8 +39,9 @@ class DhanClient:
             return
 
         try:
-            from dhanhq import dhanhq
-            self.dhan = dhanhq(self.client_id, self.access_token)
+            from dhanhq import dhanhq, DhanContext
+            context = DhanContext(self.client_id, self.access_token)
+            self.dhan = dhanhq(context)
             self._initialized = True
             logger.info("✅ DhanClient initialized (sync REST client with async wrapper).")
         except ImportError:

@@ -153,11 +153,14 @@ class TradingWorker:
                     closes = pe_df['close'].values
                     rsi = self.strategy.calculate_rsi(closes)
                     if rsi is not None and len(rsi) >= 4:
-                        logger.info(f"PE RSI: [-4]:{rsi[-4]:.2f} [-3]:{rsi[-3]:.2f} [-2]:{rsi[-2]:.2f} [-1]:{rsi[-1]:.2f}")
                         c1 = rsi[-4] < 59.99
                         c2 = rsi[-3] < 59.99
                         c3 = rsi[-2] > 59.99
-                        logger.info(f"PE Conditions: C1:{c1} C2:{c2} C3:{c3}")
+                        
+                        logger.info(f"PE RSI[-4] ({rsi[-4]:.2f}) < 59.99: C1 = {c1}")
+                        logger.info(f"PE RSI[-3] ({rsi[-3]:.2f}) < 59.99: C2 = {c2}")
+                        logger.info(f"PE RSI[-2] ({rsi[-2]:.2f}) > 59.99: C3 = {c3}")
+                        logger.info(f"All conditions (C1-C3) met for PE: {c1 and c2 and c3}")
                 else:
                     logger.info("PE: Not enough data")
                     
@@ -167,11 +170,14 @@ class TradingWorker:
                     closes = ce_df['close'].values
                     rsi = self.strategy.calculate_rsi(closes)
                     if rsi is not None and len(rsi) >= 4:
-                        logger.info(f"CE RSI: [-4]:{rsi[-4]:.2f} [-3]:{rsi[-3]:.2f} [-2]:{rsi[-2]:.2f} [-1]:{rsi[-1]:.2f}")
                         c1 = rsi[-4] < 59.99
                         c2 = rsi[-3] < 59.99
                         c3 = rsi[-2] > 59.99
-                        logger.info(f"CE Conditions: C1:{c1} C2:{c2} C3:{c3}")
+                        
+                        logger.info(f"CE RSI[-4] ({rsi[-4]:.2f}) < 59.99: C1 = {c1}")
+                        logger.info(f"CE RSI[-3] ({rsi[-3]:.2f}) < 59.99: C2 = {c2}")
+                        logger.info(f"CE RSI[-2] ({rsi[-2]:.2f}) > 59.99: C3 = {c3}")
+                        logger.info(f"All conditions (C1-C3) met for CE: {c1 and c2 and c3}")
                 else:
                     logger.info("CE: Not enough data")
                     

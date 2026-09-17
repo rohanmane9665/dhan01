@@ -81,6 +81,11 @@ class PositionRepository(BaseRepository):
         return list(result.scalars().all())
 
 class EventRepository(BaseRepository):
+    async def get_latest_event_by_type(self, event_type: str) -> Optional[SystemEvent]:
+        stmt = select(SystemEvent).where(SystemEvent.event_type == event_type).order_by(SystemEvent.timestamp.desc()).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
     async def log_system_event(self, event_type: str, severity: str, message: str, details: Optional[Dict] = None) -> SystemEvent:
         event = SystemEvent(event_type=event_type, severity=severity, message=message, details=details)
         self.session.add(event)

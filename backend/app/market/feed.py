@@ -75,13 +75,8 @@ class MarketFeed:
         if instruments:
             self._instruments = instruments
 
-        # Start the SDK feed thread
-        self._feed_thread = threading.Thread(
-            target=self._run_sdk_feed,
-            daemon=True,
-            name="DhanMarketFeed"
-        )
-        self._feed_thread.start()
+        # Start the SDK native feed thread
+        self._start_dhan_feed()
 
         # Start the async dispatch loop
         asyncio.create_task(self._dispatch_loop())
@@ -92,7 +87,7 @@ class MarketFeed:
         self._running = False
         if self._sdk_feed:
             try:
-                self._sdk_feed.close()
+                self._sdk_feed.close_connection()
             except Exception as e:
                 logger.debug(f"Error closing SDK feed: {e}")
             self._sdk_feed = None
@@ -113,24 +108,22 @@ class MarketFeed:
         self._instruments = instruments
         self._instrument_type_map.update(type_map)
 
-        # Close existing feed — the thread loop will detect and restart
+        # Close existing feed
         if self._sdk_feed:
             try:
-                self._sdk_feed.close()
+                self._sdk_feed.close_connection()
             except Exception:
                 pass
             self._sdk_feed = None
 
         logger.info(f"🔄 Instrument subscription updated: {len(instruments)} instruments")
+        self._start_dhan_feed()
 
     # ------------------------------------------------------------------ #
-    # Internal: SDK Thread                                                 #
+    # Internal: SDK Feed Setup                                           #
     # ------------------------------------------------------------------ #
-    def _run_sdk_feed(self):
-        """
-        Runs in a daemon thread. Connects to DhanHQ WebSocket and polls for data.
-        Pushes ticks into the async queue.
-        """
+    def _start_dhan_feed(self):
+        """Initializes and starts the DhanHQ native WebSocket background thread."""
         try:
             from dhanhq import DhanContext, MarketFeed as DhanMarketFeed
         except ImportError:
@@ -140,43 +133,39 @@ class MarketFeed:
             )
             return
 
-        reconnect_delay = 1
+        if not self._instruments:
+            logger.info("No instruments to subscribe.")
+            return
 
-        while self._running:
-            try:
-                if not self._instruments:
-                    logger.info("No instruments to subscribe. Waiting...")
-                    time_module.sleep(5)
-                    continue
+        logger.info(f"Connecting DhanHQ MarketFeed for {len(self._instruments)} instruments...")
+        dhan_context = DhanContext(self.client_id, self.access_token)
+        
+        self._sdk_feed = DhanMarketFeed(
+            dhan_context,
+            self._instruments,
+            version="v2",
+            on_message=self._on_message,
+            on_connect=self._on_connect,
+            on_error=self._on_error,
+            on_close=self._on_close
+        )
+        
+        # Native start() spins up a background thread running the event loop
+        self._sdk_feed.start()
+        logger.info("✅ DhanHQ MarketFeed thread started.")
 
-                logger.info(f"Connecting DhanHQ MarketFeed for {len(self._instruments)} instruments...")
-                dhan_context = DhanContext(self.client_id, self.access_token)
-                self._sdk_feed = DhanMarketFeed(dhan_context, self._instruments, "v2")
-                self._sdk_feed.run_forever()
-                reconnect_delay = 1
+    def _on_message(self, ws, message):
+        if message:
+            self._enqueue_tick(message)
 
-                logger.info("✅ DhanHQ MarketFeed connected. Streaming ticks...")
+    def _on_connect(self, ws):
+        logger.info("DhanHQ WebSocket Connected.")
 
-                while self._running and self._sdk_feed:
-                    try:
-                        response = self._sdk_feed.get_data()
-                        if response:
-                            self._enqueue_tick(response)
-                    except Exception as e:
-                        logger.debug(f"Feed get_data error: {e}")
-                        break  # Reconnect
-                    time_module.sleep(0.01)  # 10ms poll interval
+    def _on_error(self, ws, error):
+        logger.error(f"DhanHQ WebSocket Error: {error}")
 
-            except Exception as e:
-                logger.error(f"MarketFeed connection error: {e}")
-
-            # Reconnect with backoff
-            if self._running:
-                logger.warning(f"MarketFeed disconnected. Reconnecting in {reconnect_delay}s...")
-                time_module.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
-
-        logger.info("MarketFeed thread exiting.")
+    def _on_close(self, ws):
+        logger.warning("DhanHQ WebSocket Closed.")
 
     def _enqueue_tick(self, response: Dict[str, Any]):
         """Parse SDK response and push tick into async queue."""

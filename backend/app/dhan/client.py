@@ -123,9 +123,11 @@ class DhanClient:
             "modify_order",
             order_id=order_id,
             order_type=order_type,
+            leg_name="",
             quantity=int(quantity),
             price=float(price),
             trigger_price=float(trigger_price),
+            disclosed_quantity=0,
             validity="DAY",
         )
 

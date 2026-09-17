@@ -33,7 +33,7 @@ class DhanAdapter(BrokerAdapter):
             return False
         try:
             loop = asyncio.get_running_loop()
-            self.dhan = await loop.run_executor(None, lambda: dhanhq(self.client_id, self.access_token))
+            self.dhan = await loop.run_in_executor(None, lambda: dhanhq(self.client_id, self.access_token))
             self._connected = True
             logger.info("DhanAdapter connected successfully.")
             return True

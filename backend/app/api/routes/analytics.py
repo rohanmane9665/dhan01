@@ -34,3 +34,25 @@ async def get_daily_analytics():
 async def get_historical_analytics():
     """Returns historical trade analytics (TODO: query PostgreSQL trade log)."""
     return {"status": "ok", "note": "Historical data requires PostgreSQL integration", "history": []}
+
+
+from app.database.database import AsyncSessionLocal
+from sqlalchemy import select
+from app.database.models import Trade, Order
+
+@router.get("/local-trades")
+async def get_local_trades():
+    """Returns executed trades from the local PostgreSQL database (useful for Paper mode)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Trade).order_by(Trade.timestamp.desc()).limit(50))
+        trades = list(result.scalars().all())
+        return {"status": "ok", "trades": trades, "count": len(trades)}
+
+@router.get("/local-orders")
+async def get_local_orders():
+    """Returns orders from the local PostgreSQL database (useful for Paper mode)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Order).order_by(Order.timestamp.desc()).limit(50))
+        orders = list(result.scalars().all())
+        return {"status": "ok", "orders": orders, "count": len(orders)}
+

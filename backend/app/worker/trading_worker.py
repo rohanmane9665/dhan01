@@ -24,7 +24,8 @@ import json
 import logging
 import math
 import pytz
-from datetime import datetime
+import pandas as pd
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.core.config import settings
@@ -142,6 +143,115 @@ class TradingWorker:
         await self.broker.disconnect()
         await self._publish_status("STOPPED")
         logger.info("TradingWorker stopped.")
+
+    async def seed_candles(self):
+        """
+        Fetches today's intraday candle data from Dhan REST API and pre-fills the CandleEngines.
+        This allows the RSI strategy to evaluate signals immediately on startup.
+        """
+        from app.dhan.client import get_dhan_client
+
+        dhan_client = get_dhan_client()
+        dhan_client.initialize()
+
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+
+        # We need current SENSEX price to find ATM options
+        sensex_price = self._latest_sensex
+        if sensex_price <= 0:
+            # Try to get from Dhan REST
+            try:
+                result = await dhan_client.ohlc_data({"IDX_I": [51]})
+                if isinstance(result, dict):
+                    data = result.get("data", {})
+                    if isinstance(data, dict):
+                        for segment_data in data.values():
+                            if isinstance(segment_data, list):
+                                for item in segment_data:
+                                    if isinstance(item, dict):
+                                        ltp = item.get("last_price") or item.get("LTP") or item.get("ltp", 0)
+                                        if ltp:
+                                            sensex_price = float(ltp)
+                                            self._latest_sensex = sensex_price
+                                            break
+                            elif isinstance(segment_data, dict):
+                                ltp = segment_data.get("last_price") or segment_data.get("LTP", 0)
+                                if ltp:
+                                    sensex_price = float(ltp)
+                                    self._latest_sensex = sensex_price
+            except Exception as e:
+                logger.warning(f"Could not fetch SENSEX price for candle seeding: {e}")
+
+        if sensex_price <= 0:
+            logger.info("Skipping candle seeding — no SENSEX price available yet.")
+            return
+
+        atm_strike = _atm_strike(sensex_price)
+        logger.info(f"🌱 Seeding candles for SENSEX ATM {atm_strike} (SENSEX @ {sensex_price})")
+
+        for option_type in ["CE", "PE"]:
+            sec_id = self.instrument_manager.get_security_id("SENSEX", float(atm_strike), option_type)
+            if not sec_id:
+                logger.warning(f"Cannot seed {option_type} candles — security ID not resolved for strike {atm_strike}")
+                continue
+
+            try:
+                result = await dhan_client.intraday_minute_data(
+                    security_id=str(sec_id),
+                    exchange_segment="BSE_FNO",
+                    instrument_type="OPTIDX",
+                    from_date=today,
+                    to_date=today,
+                    interval=15,
+                )
+
+                if not isinstance(result, dict):
+                    logger.warning(f"Unexpected intraday data format for {option_type}: {type(result)}")
+                    continue
+
+                # Dhan returns data with 'open', 'high', 'low', 'close', 'volume', 'start_Time' lists
+                candle_data = result.get("data", result)
+                if isinstance(candle_data, dict) and "open" in candle_data:
+                    opens = candle_data.get("open", [])
+                    highs = candle_data.get("high", [])
+                    lows = candle_data.get("low", [])
+                    closes = candle_data.get("close", [])
+                    timestamps = candle_data.get("start_Time", candle_data.get("timestamp", []))
+
+                    engine = self.ce_engine if option_type == "CE" else self.pe_engine
+                    count = 0
+
+                    for i in range(len(opens)):
+                        candle = {
+                            "timestamp": datetime.fromisoformat(timestamps[i]) if isinstance(timestamps[i], str) else timestamps[i],
+                            "open": float(opens[i]),
+                            "high": float(highs[i]),
+                            "low": float(lows[i]),
+                            "close": float(closes[i]),
+                            "volume": 0,
+                        }
+                        engine.candles.append(candle)
+                        count += 1
+
+                    # Set current candle to the last one
+                    if engine.candles:
+                        engine.current_candle = engine.candles.pop()
+
+                    logger.info(f"🌱 Seeded {count} historical 15-min candles for {option_type} (sec_id={sec_id})")
+
+                    # Update latest option LTP from the last candle
+                    if closes:
+                        last_close = float(closes[-1])
+                        if option_type == "CE":
+                            self._latest_ce_ltp = last_close
+                        else:
+                            self._latest_pe_ltp = last_close
+
+                else:
+                    logger.warning(f"No candle data available for {option_type} seeding: {list(candle_data.keys()) if isinstance(candle_data, dict) else 'non-dict'}")
+
+            except Exception as e:
+                logger.error(f"Error seeding {option_type} candles: {e}")
 
     # ------------------------------------------------------------------ #
     # Tick ingestion (called externally by MarketFeed bridge)             #

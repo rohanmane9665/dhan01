@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, trading, positions, streaming, analytics, risk, logs, auth_routes
+from app.api.routes import health, trading, positions, streaming, analytics, risk, logs, auth_routes, dhan_data
 from app.api.auth import verify_admin_token
 from fastapi import Depends
 from app.core.config import settings
@@ -67,3 +67,4 @@ app.include_router(streaming.router, prefix="/api/v1/stream", tags=["streaming"]
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"], dependencies=[Depends(verify_admin_token)])
 app.include_router(risk.router, prefix="/api/v1/risk", tags=["risk"], dependencies=[Depends(verify_admin_token)])
 app.include_router(logs.router, prefix="/api/v1/logs", tags=["logs"], dependencies=[Depends(verify_admin_token)])
+app.include_router(dhan_data.router, prefix="/api/v1/dhan", tags=["dhan-data"], dependencies=[Depends(verify_admin_token)])

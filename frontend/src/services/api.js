@@ -32,6 +32,8 @@ export const getPositions   = ()         => api.get('/positions/').then(r => r.d
 // ── Analytics ────────────────────────────────────────────────────────────────
 export const getDailyStats  = ()         => api.get('/analytics/daily').then(r => r.data);
 export const getHistorical  = ()         => api.get('/analytics/historical').then(r => r.data);
+export const getLocalTrades = ()         => api.get('/analytics/local-trades').then(r => r.data);
+export const getLocalOrders = ()         => api.get('/analytics/local-orders').then(r => r.data);
 
 // ── Risk ─────────────────────────────────────────────────────────────────────
 export const getRisk        = ()         => api.get('/risk/').then(r => r.data);
@@ -41,5 +43,23 @@ export const getLogs        = (n = 200)  => api.get(`/logs/?limit=${n}`).then(r 
 
 // ── Health ───────────────────────────────────────────────────────────────────
 export const getHealth      = ()         => api.get('/ready').then(r => r.data);
+
+// ── Dhan Broker Data (Dynamic) ──────────────────────────────────────
+export const getFundLimits     = ()         => api.get('/dhan/fund-limits').then(r => r.data);
+export const getBrokerPositions = ()        => api.get('/dhan/positions').then(r => r.data);
+export const getBrokerOrders    = ()        => api.get('/dhan/orders').then(r => r.data);
+export const getHoldings        = ()        => api.get('/dhan/holdings').then(r => r.data);
+export const getTradeBook       = (orderId) => api.get(`/dhan/trade-book${orderId ? `?order_id=${orderId}` : ''}`).then(r => r.data);
+export const getTickerData      = (segment, ids) => api.get(`/dhan/ticker?exchange_segment=${segment}&security_ids=${ids}`).then(r => r.data);
+export const getOhlcData        = (segment, ids) => api.get(`/dhan/ohlc?exchange_segment=${segment}&security_ids=${ids}`).then(r => r.data);
+export const getQuoteData       = (segment, ids) => api.get(`/dhan/quotes?exchange_segment=${segment}&security_ids=${ids}`).then(r => r.data);
+export const getIntradayCandles = (secId, opts = {}) => {
+  const params = new URLSearchParams({ security_id: secId, ...opts });
+  return api.get(`/dhan/intraday-candles?${params}`).then(r => r.data);
+};
+export const getHistoricalCandles = (secId, from, to, opts = {}) => {
+  const params = new URLSearchParams({ security_id: secId, from_date: from, to_date: to, ...opts });
+  return api.get(`/dhan/historical-candles?${params}`).then(r => r.data);
+};
 
 export default api;

@@ -1,8 +1,8 @@
 import React from 'react';
-import { Activity, TrendingUp, DollarSign, BarChart2, Shield, Zap } from 'lucide-react';
+import { Activity, TrendingUp, DollarSign, BarChart2, Shield, Zap, Wallet } from 'lucide-react';
 import { useSSE } from '../hooks/useSSE';
 import { useFetch } from '../hooks/useFetch';
-import { getDailyStats } from '../services/api';
+import { getDailyStats, getFundLimits } from '../services/api';
 import { StatCard, Badge } from '../components/ui';
 
 function PnLTicker({ value }) {
@@ -14,6 +14,7 @@ function PnLTicker({ value }) {
 export default function Dashboard() {
   const { data: sse, connected } = useSSE();
   const { data: stats } = useFetch(getDailyStats, 5000);
+  const { data: funds } = useFetch(getFundLimits, 15000);
 
   const sensex     = sse?.sensex     || 0;
   const ceLtp      = sse?.ce_ltp     || 0;
@@ -23,6 +24,11 @@ export default function Dashboard() {
   const trades     = stats?.trades_today ?? sse?.trades_today ?? 0;
   const winRate    = stats?.win_rate ?? 0;
   const killActive = sse?.kill_switch ?? false;
+
+  // Fund limits from Dhan API
+  const fundData = funds?.data?.data || funds?.data || {};
+  const availableBalance = fundData?.availabelBalance ?? fundData?.sodLimit ?? null;
+  const utilizedMargin   = fundData?.utilizedAmount ?? null;
 
   return (
     <div className="p-6 space-y-6">
@@ -55,8 +61,38 @@ export default function Dashboard() {
         <StatCard label="Win Rate" value={`${winRate}%`} color="purple" sub="Today's sessions" icon={BarChart2} />
       </div>
 
-      {/* Market Prices */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* Fund Limits + Market Prices */}
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+        {/* Fund Limits Card */}
+        <div className="xl:col-span-2 rounded-xl border border-gray-800 bg-gray-900/60 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Wallet size={16} className="text-emerald-400" />
+            <p className="text-xs text-gray-500 uppercase tracking-widest">Account Balance</p>
+            <Badge variant="green">Dhan Live</Badge>
+          </div>
+          {availableBalance !== null ? (
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs text-gray-600 mb-0.5">Available Balance</p>
+                <p className="text-2xl font-mono font-bold text-emerald-400">
+                  ₹{Number(availableBalance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              {utilizedMargin !== null && (
+                <div>
+                  <p className="text-xs text-gray-600 mb-0.5">Margin Utilized</p>
+                  <p className="text-sm font-mono text-yellow-400">
+                    ₹{Number(utilizedMargin).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600 font-mono">Connecting to Dhan...</p>
+          )}
+        </div>
+
+        {/* Market Prices */}
         {[
           { label: 'SENSEX Index', value: sensex, color: 'blue' },
           { label: 'CE LTP', value: ceLtp, color: 'green' },

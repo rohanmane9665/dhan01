@@ -11,7 +11,7 @@ from app.execution.engine import ExecutionEngine
 from app.risk.manager import RiskManager
 from app.execution.position_manager import PositionManager
 from app.market.candle_engine import CandleEngine
-from app.worker.data_validator import DataValidator
+from app.market.validator import DataValidator
 from app.strategies.index_breakout import IndexBreakoutStrategy
 from app.strategies.models import Signal, SignalType
 from app.reconciliation.service import ReconciliationService
@@ -212,30 +212,33 @@ class TradingWorker:
         if self.risk_manager.kill_switch_active:
             return
 
-        ts = tick.get("timestamp") or datetime.now(IST)
-        ltp = float(tick.get("ltp", 0.0))
-        tick_type = tick.get("type", "INDEX")
-        security_id = str(tick.get("security_id", ""))
+        try:
+            ts = tick.get("timestamp") or datetime.now(IST)
+            ltp = float(tick.get("ltp", 0.0))
+            tick_type = tick.get("type", "INDEX")
+            security_id = str(tick.get("security_id", ""))
 
-        is_valid, reason = self.validator.validate(ltp, ts)
-        if not is_valid:
-            return
+            is_valid, reason = self.validator.validate(ltp, ts)
+            if not is_valid:
+                return
 
-        if tick_type == "INDEX" and security_id == "13":
-            self._latest_index = ltp
-            completed = self.index_engine.process_tick(ltp, ts)
-            if completed:
-                await self._on_candle_close(completed)
-            
-            # Check Breakout Monitor
-            if self._waiting_for_breakout:
-                await self._check_breakout(ltp, ts)
+            if tick_type == "INDEX" and security_id == "13":
+                self._latest_index = ltp
+                completed = self.index_engine.process_tick(ltp, ts)
+                if completed:
+                    await self._on_candle_close(completed)
+                
+                # Check Breakout Monitor
+                if self._waiting_for_breakout:
+                    await self._check_breakout(ltp, ts)
 
-        elif tick_type == "PE" and security_id == self._active_put_security_id:
-            self._latest_put_ltp = ltp
+            elif tick_type == "PE" and security_id == self._active_put_security_id:
+                self._latest_put_ltp = ltp
 
-        await self._monitor_positions(ltp, tick_type, security_id)
-        await self._publish_snapshot()
+            await self._monitor_positions(ltp, tick_type, security_id)
+            await self._publish_snapshot()
+        except Exception as e:
+            logger.error(f"Error processing tick {tick}: {e}", exc_info=True)
 
     async def _on_candle_close(self, candle: dict):
         logger.info(f"📊 NIFTY 5m Candle closed: O={candle['open']} H={candle['high']} L={candle['low']} C={candle['close']}")

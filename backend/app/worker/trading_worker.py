@@ -356,3 +356,12 @@ class TradingWorker:
             await redis_client.set("worker_status", status)
         except:
             pass
+
+_worker_instance = None
+
+def set_worker(worker: TradingWorker):
+    global _worker_instance
+    _worker_instance = worker
+
+def get_worker() -> TradingWorker:
+    return _worker_instance

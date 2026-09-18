@@ -293,6 +293,18 @@ class TradingWorker:
             
         self._active_put_security_id = security_id
         
+        if hasattr(self, "market_feed") and self.market_feed:
+            try:
+                from dhanhq import MarketFeed as DhanMF
+                instruments = getattr(self.market_feed, "_instruments", []).copy()
+                type_map = getattr(self.market_feed, "_instrument_type_map", {}).copy()
+                instruments.append((DhanMF.BSE_FNO, str(security_id), DhanMF.Ticker))
+                type_map[str(security_id)] = "PE"
+                self.market_feed.update_instruments(instruments, type_map)
+                logger.info(f"📡 Dynamically subscribed to PUT {security_id}")
+            except Exception as e:
+                logger.error(f"Failed to dynamically subscribe to {security_id}: {e}")
+        
         # Generate Signal to execute buy
         signal = Signal(
             symbol=f"NIFTY_{atm_strike}_PE",

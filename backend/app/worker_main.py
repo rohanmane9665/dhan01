@@ -24,7 +24,7 @@ from app.core.logging import setup_logging
 from app.database.database import engine, Base
 from app.worker.trading_worker import TradingWorker, set_worker
 from app.scheduler.scheduler import start_scheduler
-from app.market.feed import MarketFeed, SENSEX_SECURITY_ID
+from app.market.feed import MarketFeed
 from app.core.redis import redis_client
 from app.dhan.client import get_dhan_client
 
@@ -38,9 +38,7 @@ async def resolve_instruments(worker: TradingWorker) -> list:
     Resolve the real instrument IDs for MarketFeed subscription.
 
     Subscribes to:
-    1. SENSEX Index (IDX_I, security_id=51, Ticker mode)
-    2. ATM CE option (BSE_FNO, resolved from instrument master)
-    3. ATM PE option (BSE_FNO, resolved from instrument master)
+    1. NIFTY 50 Index (IDX_I, security_id=13, Ticker mode)
     """
     instruments = []
     type_map = {}
@@ -51,58 +49,12 @@ async def resolve_instruments(worker: TradingWorker) -> list:
         logger.error("dhanhq not installed. Cannot resolve instruments for MarketFeed.")
         return instruments, type_map
 
-    # 1. Subscribe to SENSEX Index
-    instruments.append((DhanMF.IDX, SENSEX_SECURITY_ID, DhanMF.Ticker))
-    type_map[SENSEX_SECURITY_ID] = "INDEX"
-    logger.info(f"📊 Subscribed to SENSEX Index (ID: {SENSEX_SECURITY_ID})")
+    NIFTY_SECURITY_ID = "13"
 
-    # 2. Get current SENSEX price from Dhan REST API to determine ATM strike
-    dhan_client = get_dhan_client()
-    dhan_client.initialize()
-
-    sensex_price = 0.0
-    try:
-        ticker_result = await dhan_client.ohlc_data({"IDX_I": [int(SENSEX_SECURITY_ID)]})
-        if isinstance(ticker_result, dict):
-            data = ticker_result.get("data", {})
-            if isinstance(data, dict):
-                # Dhan returns data nested by segment
-                for segment_data in data.values():
-                    if isinstance(segment_data, dict) and "last_price" in segment_data:
-                        sensex_price = float(segment_data["last_price"])
-                    elif isinstance(segment_data, list):
-                        for item in segment_data:
-                            if isinstance(item, dict):
-                                ltp = item.get("last_price") or item.get("LTP") or item.get("ltp", 0)
-                                if ltp:
-                                    sensex_price = float(ltp)
-                                    break
-        logger.info(f"📈 Current SENSEX price from Dhan: {sensex_price}")
-    except Exception as e:
-        logger.warning(f"Could not fetch SENSEX price for ATM: {e}. Will subscribe after first tick.")
-
-    # 3. Resolve ATM CE/PE instruments if we have a SENSEX price
-    if sensex_price > 0:
-        atm_strike = math.ceil(sensex_price / 100) * 100
-
-        ce_sec_id = worker.instrument_manager.get_security_id("SENSEX", float(atm_strike), "CE")
-        pe_sec_id = worker.instrument_manager.get_security_id("SENSEX", float(atm_strike), "PE")
-
-        if ce_sec_id:
-            instruments.append((DhanMF.BSE_FNO, str(ce_sec_id), DhanMF.Ticker))
-            type_map[str(ce_sec_id)] = "CE"
-            logger.info(f"📗 Subscribed to SENSEX {atm_strike} CE (ID: {ce_sec_id})")
-        else:
-            logger.warning(f"Could not resolve CE security ID for SENSEX {atm_strike}")
-
-        if pe_sec_id:
-            instruments.append((DhanMF.BSE_FNO, str(pe_sec_id), DhanMF.Ticker))
-            type_map[str(pe_sec_id)] = "PE"
-            logger.info(f"📕 Subscribed to SENSEX {atm_strike} PE (ID: {pe_sec_id})")
-        else:
-            logger.warning(f"Could not resolve PE security ID for SENSEX {atm_strike}")
-    else:
-        logger.warning("SENSEX price unavailable — option instruments will be subscribed dynamically.")
+    # 1. Subscribe to NIFTY Index
+    instruments.append((DhanMF.IDX, NIFTY_SECURITY_ID, DhanMF.Ticker))
+    type_map[NIFTY_SECURITY_ID] = "INDEX"
+    logger.info(f"📊 Subscribed to NIFTY Index (ID: {NIFTY_SECURITY_ID})")
 
     return instruments, type_map
 
@@ -166,12 +118,13 @@ async def main():
     for sec_id, tick_type in type_map.items():
         feed.set_instrument_type(sec_id, tick_type)
     await feed.start(instruments if instruments else None)
+    worker.market_feed = feed
 
-    # Wait for SENSEX price to populate from live market feed before seeding
-    if worker._latest_sensex <= 0:
-        logger.info("⏳ Waiting for SENSEX price from market feed before seeding candles...")
+    # Wait for NIFTY price to populate from live market feed before seeding
+    if worker._latest_index <= 0:
+        logger.info("⏳ Waiting for NIFTY price from market feed before seeding candles...")
         for _ in range(15):
-            if worker._latest_sensex > 0:
+            if worker._latest_index > 0:
                 break
             await asyncio.sleep(1)
 

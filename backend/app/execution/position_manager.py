@@ -4,7 +4,6 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-
 class Position:
     """
     Stateful Position Tracking Object.
@@ -20,7 +19,7 @@ class Position:
         quantity: int,
         entry_price: float,
         stop_loss: float,
-        strategy_id: str = "option_rsi_sensex"
+        strategy_id: str = "index_breakout_nifty"
     ):
         self.position_id = position_id
         self.symbol = symbol
@@ -36,38 +35,57 @@ class Position:
         self.exit_time: Optional[datetime] = None
         self.exit_price: Optional[float] = None
         self.realized_pnl: float = 0.0
-        self.trailed_sl: bool = False
+
+        self.trailing_levels = [
+            {'price_level': 44, 'stop_loss': 25},
+            {'price_level': 61, 'stop_loss': 41},
+            {'price_level': 77, 'stop_loss': 57},
+            {'price_level': 93, 'stop_loss': 72},
+            {'price_level': 108, 'stop_loss': 88},
+            {'price_level': 128, 'stop_loss': 104},
+            {'price_level': 150, 'stop_loss': 120},
+            {'price_level': 174, 'stop_loss': 138},
+            {'price_level': 195, 'stop_loss': 159},
+            {'price_level': 215, 'stop_loss': 183},
+            {'price_level': 245, 'stop_loss': 210},
+            {'price_level': 267, 'stop_loss': 235},
+            {'price_level': 290, 'stop_loss': 250},
+            {'price_level': 310, 'stop_loss': 307}  # Final exit level
+        ]
 
     def update_price(self, current_price: float) -> Optional[str]:
         """
         Updates LTP, calculates unrealized P&L, checks protective Stop Loss and Trailing SL.
-        Returns exit_reason string if Stop Loss is hit.
+        Returns exit_reason string if Stop Loss is hit or Final target hit.
         """
         if current_price <= 0:
             return None
         self.current_price = current_price
 
-        # Check Protective Stop Loss
+        # Check Final Exit
+        if current_price >= self.entry_price + 310:
+            return f"FINAL_TARGET_HIT (LTP {current_price} >= Entry {self.entry_price} + 310)"
+
+        # Check Protective/Trailing Stop Loss
         if current_price <= self.stop_loss:
             return f"STOP_LOSS_HIT (LTP {current_price} <= SL {self.stop_loss})"
 
-        return None
+        # Evaluate Trailing SL Tiers
+        for level in self.trailing_levels[:-1]:  # Exclude final exit level
+            price_threshold = self.entry_price + level['price_level']
+            new_stop_loss = self.entry_price + level['stop_loss']
+            
+            if current_price >= price_threshold and new_stop_loss > self.stop_loss:
+                old_sl = self.stop_loss
+                self.stop_loss = new_stop_loss
+                logger.info(f"📈 Trailing SL updated for {self.symbol}: {old_sl} -> {self.stop_loss} (Reached Threshold: {price_threshold})")
+                break
 
-    def trail_stop_loss(self, iloc_2_range: float, iloc_3_low: float):
-        """
-        Trails SL when price rises by iloc[-2] range: Entry + Range. Updates SL to iloc[-3] Low.
-        """
-        trigger_level = self.entry_price + iloc_2_range
-        if self.current_price >= trigger_level and iloc_3_low > self.stop_loss:
-            old_sl = self.stop_loss
-            self.stop_loss = iloc_3_low
-            self.trailed_sl = True
-            logger.info(f"📈 Trailing SL updated for {self.symbol}: {old_sl} -> {self.stop_loss}")
+        return None
 
     @property
     def unrealized_pnl(self) -> float:
         return (self.current_price - self.entry_price) * self.quantity
-
 
 class PositionManager:
     """

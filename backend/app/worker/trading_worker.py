@@ -170,15 +170,15 @@ class TradingWorker:
             # Using intraday_minute_data which accepts from/to date
             result = await dhan.intraday_minute_data(
                 security_id="13",
-                exchange_segment="IDX_I",
+                exchange_segment="IDX",  # NIFTY is on NSE (IDX), not BSE (IDX_I)
                 instrument_type="INDEX",
                 from_date=from_date_str,
                 to_date=to_date_str,
                 interval=5
             )
             
-            if not isinstance(result, dict) or result.get('status') != 'success':
-                logger.warning(f"Failed to fetch historical data for NIFTY: {result}")
+            if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
+                logger.warning(f"Failed to fetch historical data for NIFTY (Check credentials or ID): {result}")
                 return
             
             candle_data = result.get("data", {})

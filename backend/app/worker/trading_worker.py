@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 import pytz
 import math
 
-from app.config import settings
-from app.redis.connection import redis_client
+from app.core.config import settings
+from app.core.redis import redis_client
 from app.execution.engine import ExecutionEngine
 from app.execution.risk_manager import RiskManager
 from app.execution.position_manager import PositionManager

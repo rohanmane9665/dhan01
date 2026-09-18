@@ -128,7 +128,8 @@ class TradingWorker:
                         logger.info(f"(B1 High - B1 Low) < 150: C10 = {c_vals.get('C10')}")
                         logger.info(f"(B2 High - B2 Low) < 150: C11 = {c_vals.get('C11')}")
                         b2_rsi = c_vals.get('b2_rsi')
-                        logger.info(f"B2 RSI(14) ({b2_rsi:.2f} if b2_rsi else 'N/A') > 40: C12 = {c_vals.get('C12')}")
+                        b2_rsi_str = f"{b2_rsi:.2f}" if b2_rsi is not None else "N/A"
+                        logger.info(f"B2 RSI(14) ({b2_rsi_str}) > 40: C12 = {c_vals.get('C12')}")
                         logger.info(f"All conditions (C1-C4, C6-C12) met: {pattern_formed}")
                 else:
                     logger.info("Index: Not enough data for C1-C12 evaluation")

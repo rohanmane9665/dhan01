@@ -2,7 +2,7 @@ import logging
 import pandas as pd
 from typing import Optional, Dict, Any, Tuple
 from app.strategies.base import BaseStrategy
-from app.strategies.models import Signal, SignalType
+from app.strategies.models import Signal
 import numpy as np
 
 logger = logging.getLogger(__name__)

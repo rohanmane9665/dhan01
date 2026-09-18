@@ -13,7 +13,7 @@ from app.execution.position_manager import PositionManager
 from app.market.candle_engine import CandleEngine
 from app.market.validator import DataValidator
 from app.strategies.index_breakout import IndexBreakoutStrategy
-from app.strategies.models import Signal, SignalType
+from app.strategies.models import Signal
 from app.reconciliation.service import ReconciliationService
 from app.scheduler.market_calendar import MarketCalendar
 from app.market.instruments import InstrumentManager
@@ -296,12 +296,12 @@ class TradingWorker:
         # Generate Signal to execute buy
         signal = Signal(
             symbol=f"NIFTY_{atm_strike}_PE",
-            direction=SignalType.BUY,
+            direction="BUY",
             option_type="PE",
             entry_reference=0.0, # Market price
             stop_loss_reference=0.0, # Handled by SL tiers
             signal_reason="NIFTY_5M_BREAKOUT",
-            metadata={"security_id": security_id}
+            security_id=security_id
         )
         
         logger.info(f"🎯 Firing PUT Signal for {signal.symbol} (Sec ID: {security_id})")

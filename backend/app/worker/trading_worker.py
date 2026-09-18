@@ -8,7 +8,7 @@ import math
 from app.core.config import settings
 from app.core.redis import redis_client
 from app.execution.engine import ExecutionEngine
-from app.execution.risk_manager import RiskManager
+from app.risk.manager import RiskManager
 from app.execution.position_manager import PositionManager
 from app.market.candle_engine import CandleEngine
 from app.worker.data_validator import DataValidator

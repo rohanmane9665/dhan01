@@ -189,6 +189,78 @@ class ExecutionEngine:
                     "reason": remarks
                 }
 
+    async def partial_close_position(self, position_id: str, quantity: int, exit_price: float) -> Dict[str, Any]:
+        """
+        Submits a partial close SELL order for the specified quantity.
+        """
+        pos = self.position_manager.active_positions.get(position_id)
+        if not pos or pos.quantity < quantity:
+            return {"status": "ERROR", "reason": f"Position {position_id} not found or insufficient quantity"}
+
+        order_id = f"EXIT_{uuid.uuid4().hex[:8].upper()}"
+        order_payload = {
+            "order_id": order_id,
+            "correlation_id": order_id,
+            "security_id": pos.security_id,
+            "exchange_segment": "BSE_FNO",
+            "transaction_type": "SELL",
+            "quantity": quantity,
+            "order_type": "MARKET",
+            "product_type": "INTRADAY",
+            "price": 0.0,
+            "reference_price": exit_price,
+        }
+
+        logger.info(f"Partial closing position {position_id} ({pos.symbol}) - Qty {quantity} @ ₹{exit_price}")
+        
+        async with AsyncSessionLocal() as session:
+            order_repo = OrderRepository(session)
+            trade_repo = TradeRepository(session)
+            event_repo = EventRepository(session)
+
+            await order_repo.create_order({
+                "id": order_id,
+                "symbol": pos.symbol,
+                "side": "SELL",
+                "quantity": quantity,
+                "order_type": "MARKET",
+                "price": exit_price,
+                "status": "PENDING"
+            })
+
+            broker_resp = await self.broker.place_order(order_payload)
+            status = broker_resp.get("status")
+            resp_data = broker_resp.get("data", {})
+
+            if status == "success":
+                fill_price = float(resp_data.get("tradedPrice", exit_price))
+                broker_order_id = str(resp_data.get("orderId", order_id))
+                
+                await order_repo.update_status(order_id, "FILLED", broker_order_id)
+                
+                await trade_repo.create_trade({
+                    "id": f"TRD_{uuid.uuid4().hex[:8].upper()}",
+                    "order_id": order_id,
+                    "symbol": pos.symbol,
+                    "side": "SELL",
+                    "quantity": quantity,
+                    "price": fill_price
+                })
+
+                self.position_manager.partial_close(position_id, quantity, fill_price)
+                await event_repo.log_system_event("POSITION_PARTIAL_CLOSED", "INFO", f"Sold {quantity} of {position_id} at {fill_price}")
+
+                return {
+                    "order_id": order_id,
+                    "status": "PARTIAL_CLOSED",
+                    "traded_price": fill_price
+                }
+            else:
+                await order_repo.update_status(order_id, "FAILED")
+                remarks = broker_resp.get("remarks", "Partial exit order failed")
+                await event_repo.log_system_event("ORDER_FAILED", "ERROR", f"Partial Exit order {order_id} failed: {remarks}")
+                return {"order_id": order_id, "status": "FAILED", "reason": remarks}
+
     async def close_position(self, position_id: str, exit_price: float) -> Dict[str, Any]:
         """
         Closes an open position by submitting a SELL order and updating PositionManager and DB.

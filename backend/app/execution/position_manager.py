@@ -26,7 +26,9 @@ class Position:
         self.security_id = security_id
         self.option_type = option_type
         self.quantity = quantity
+        self.initial_quantity = quantity
         self.entry_price = entry_price
+        self.initial_stop_loss = stop_loss
         self.stop_loss = stop_loss
         self.strategy_id = strategy_id
         self.current_price = entry_price
@@ -36,50 +38,52 @@ class Position:
         self.exit_price: Optional[float] = None
         self.realized_pnl: float = 0.0
 
-        self.trailing_levels = [
-            {'price_level': 44, 'stop_loss': 25},
-            {'price_level': 61, 'stop_loss': 41},
-            {'price_level': 77, 'stop_loss': 57},
-            {'price_level': 93, 'stop_loss': 72},
-            {'price_level': 108, 'stop_loss': 88},
-            {'price_level': 128, 'stop_loss': 104},
-            {'price_level': 150, 'stop_loss': 120},
-            {'price_level': 174, 'stop_loss': 138},
-            {'price_level': 195, 'stop_loss': 159},
-            {'price_level': 215, 'stop_loss': 183},
-            {'price_level': 245, 'stop_loss': 210},
-            {'price_level': 267, 'stop_loss': 235},
-            {'price_level': 290, 'stop_loss': 250},
-            {'price_level': 310, 'stop_loss': 307}  # Final exit level
-        ]
+        # Calculated risk diff
+        self.risk_diff = self.entry_price - self.initial_stop_loss
+        if self.risk_diff <= 0:
+            self.risk_diff = 1.0  # Failsafe
+            
+        self.target_1 = self.entry_price + (2 * self.risk_diff)
+        self.target_1_hit = False
+        
+        # Max tracked level for trailing
+        self.current_trail_level = 0
 
     def update_price(self, current_price: float) -> Optional[str]:
         """
-        Updates LTP, calculates unrealized P&L, checks protective Stop Loss and Trailing SL.
-        Returns exit_reason string if Stop Loss is hit or Final target hit.
+        Updates LTP, handles Partial Exits at Target 1, and updates Trailing SL.
+        Returns:
+            - 'PARTIAL_EXIT' if target 1 is hit.
+            - exit_reason string if full close.
+            - None if no action.
         """
         if current_price <= 0:
             return None
         self.current_price = current_price
 
-        # Check Final Exit
-        if current_price >= self.entry_price + 310:
-            return f"FINAL_TARGET_HIT (LTP {current_price} >= Entry {self.entry_price} + 310)"
-
-        # Check Protective/Trailing Stop Loss
+        # Check Protective/Trailing Stop Loss First
         if current_price <= self.stop_loss:
             return f"STOP_LOSS_HIT (LTP {current_price} <= SL {self.stop_loss})"
 
-        # Evaluate Trailing SL Tiers
-        for level in self.trailing_levels[:-1]:  # Exclude final exit level
-            price_threshold = self.entry_price + level['price_level']
-            new_stop_loss = self.entry_price + level['stop_loss']
-            
-            if current_price >= price_threshold and new_stop_loss > self.stop_loss:
-                old_sl = self.stop_loss
-                self.stop_loss = new_stop_loss
-                logger.info(f"📈 Trailing SL updated for {self.symbol}: {old_sl} -> {self.stop_loss} (Reached Threshold: {price_threshold})")
-                break
+        # Check Target 1 (Partial Exit)
+        if not self.target_1_hit and current_price >= self.target_1:
+            self.target_1_hit = True
+            self.stop_loss = self.entry_price
+            logger.info(f"🎯 Target 1 Hit at {current_price}! Trailing SL moved to breakeven ({self.stop_loss}).")
+            return "PARTIAL_EXIT"
+
+        # Check Trailing Tiers if Target 1 was hit
+        if self.target_1_hit:
+            # Check multipliers 3 to 8
+            for n in range(3, 9):
+                price_threshold = self.entry_price + (n * self.risk_diff)
+                if current_price >= price_threshold and self.current_trail_level < n:
+                    self.current_trail_level = n
+                    new_sl = self.entry_price + ((n - 2) * self.risk_diff)
+                    if new_sl > self.stop_loss:
+                        old_sl = self.stop_loss
+                        self.stop_loss = new_sl
+                        logger.info(f"📈 Trailing SL Tier {n} reached at {current_price}! SL updated: {old_sl} -> {self.stop_loss}")
 
         return None
 
@@ -97,7 +101,15 @@ class PositionManager:
 
     def add_position(self, pos: Position):
         self.active_positions[pos.position_id] = pos
-        logger.info(f"Position opened: {pos.symbol} (ID: {pos.position_id}, Entry: ₹{pos.entry_price})")
+        logger.info(f"Position opened: {pos.symbol} (ID: {pos.position_id}, Entry: ₹{pos.entry_price}, Qty: {pos.quantity})")
+
+    def partial_close(self, position_id: str, close_qty: int, exit_price: float):
+        pos = self.active_positions.get(position_id)
+        if pos and pos.quantity >= close_qty:
+            pos.quantity -= close_qty
+            pnl = (exit_price - pos.entry_price) * close_qty
+            pos.realized_pnl += pnl
+            logger.info(f"Partial Close: {pos.symbol} sold {close_qty} @ ₹{exit_price} (PnL: ₹{pnl:.2f}). Remaining Qty: {pos.quantity}")
 
     def close_position(self, position_id: str, exit_price: float) -> Optional[Position]:
         pos = self.active_positions.pop(position_id, None)
@@ -105,8 +117,9 @@ class PositionManager:
             pos.status = "CLOSED"
             pos.exit_price = exit_price
             pos.exit_time = datetime.now(timezone.utc)
-            pos.realized_pnl = (exit_price - pos.entry_price) * pos.quantity
-            logger.info(f"Position closed: {pos.symbol} @ ₹{exit_price} (PnL: ₹{pos.realized_pnl:.2f})")
+            pos.realized_pnl += (exit_price - pos.entry_price) * pos.quantity
+            pos.quantity = 0
+            logger.info(f"Position full closed: {pos.symbol} @ ₹{exit_price} (Total PnL: ₹{pos.realized_pnl:.2f})")
             return pos
         return None
 

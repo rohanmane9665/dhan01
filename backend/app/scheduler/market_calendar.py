@@ -66,5 +66,31 @@ class MarketCalendar:
             return False
         if t.hour > 15 or (t.hour == 15 and t.minute >= 30):
             return False
-
         return True
+
+    def get_next_expiry(self, current_date: date = None, target_weekday: int = 1) -> date:
+        """
+        Get the next expiry date. Defaults to Tuesday (1) as requested by user.
+        If the target day is a holiday, shifts back to the previous trading day.
+        """
+        if current_date is None:
+            current_date = datetime.now(IST).date()
+            
+        current_weekday = current_date.weekday()
+        days_to_add = (target_weekday - current_weekday + 7) % 7
+        expiry = current_date + __import__('datetime').timedelta(days=days_to_add)
+        
+        while not self.is_trading_day(expiry):
+            expiry -= __import__('datetime').timedelta(days=1)
+            
+        return expiry
+
+    def get_expiry_str_dd_mmm(self) -> str:
+        """Returns format: DD MMM (e.g. 15 JUL)"""
+        expiry = self.get_next_expiry()
+        return expiry.strftime("%d %b").upper()
+
+    def get_expiry_str_yyyy_mm_dd(self) -> str:
+        """Returns format: YYYY-MM-DD"""
+        expiry = self.get_next_expiry()
+        return expiry.strftime("%Y-%m-%d")

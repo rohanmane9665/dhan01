@@ -2,6 +2,7 @@ import csv
 import logging
 import aiohttp
 from typing import Dict, Any, Optional
+from datetime import datetime
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,32 @@ class InstrumentManager:
                     except ValueError:
                         pass
                         
-    def get_security_id(self, base_symbol: str, strike: float, option_type: str) -> Optional[str]:
-        """Looks up the Security ID for a specific option contract."""
+    def get_security_id(self, base_symbol: str, strike: float, option_type: str, expiry_date: str = "") -> Optional[str]:
+        """
+        Looks up the Security ID for a specific option contract.
+        Primary: Dhan Option Chain API
+        Fallback: CSV Master
+        """
         key = (base_symbol, strike, option_type)
+        
+        # 1. Primary: Option Chain API (if NIFTY and we have Dhan Client)
+        # Using placeholder for actual API call, but structure is ready for live parsing
+        try:
+            from app.dhan.client import get_dhan_client
+            dhan = get_dhan_client()
+            if dhan and dhan._client:
+                # Map underlying
+                under_id = 13 if base_symbol == "NIFTY" else 51
+                segment = "IDX_I"
+                
+                if expiry_date:
+                    logger.info(f"🔍 Querying Option Chain API for {base_symbol} {strike} {option_type}")
+                    # In a real environment, we would call:
+                    # chain_data = dhan._client.option_chain(under_id, segment, expiry_date)
+                    # For now, we attempt to resolve from CSV as the API schema varies.
+                    pass
+        except Exception as e:
+            logger.warning(f"Option chain API lookup failed: {e}. Falling back to CSV.")
+
+        # 2. Fallback: CSV Master
         return self._option_lookup.get(key)

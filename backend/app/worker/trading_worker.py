@@ -151,60 +151,87 @@ class TradingWorker:
         logger.info("TradingWorker stopped.")
 
     async def seed_candles(self):
-        """
-        Fetches today's intraday candle data from Dhan REST API and pre-fills the Index CandleEngine.
-        """
-        from app.dhan.client import get_dhan_client
-        dhan_client = get_dhan_client()
-        dhan_client.initialize()
-
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-
+        """Seed the CandleEngine with recent historical data so RSI is warm at 9:15 AM."""
         try:
+            from app.dhan.client import get_dhan_client
+            dhan = get_dhan_client()
+            dhan.initialize()
+
+            logger.info("Seeding CandleEngine with historical NIFTY data for RSI...")
+            
+            # Fetch last 5 days to ensure we have enough previous-day candles for RSI
+            to_date = datetime.now(IST)
+            from_date = to_date - timedelta(days=5)
+            
+            from_date_str = from_date.strftime("%Y-%m-%d")
+            to_date_str = to_date.strftime("%Y-%m-%d")
+
             # 13 is NIFTY 50 Index on Dhan
-            result = await dhan_client.intraday_minute_data(
+            # Using intraday_minute_data which accepts from/to date
+            result = await dhan.intraday_minute_data(
                 security_id="13",
                 exchange_segment="IDX_I",
                 instrument_type="INDEX",
-                from_date=today,
-                to_date=today,
-                interval=5,
+                from_date=from_date_str,
+                to_date=to_date_str,
+                interval=5
             )
             
-            if not isinstance(result, dict):
-                logger.warning(f"Unexpected intraday data format for NIFTY: {type(result)}")
+            if not isinstance(result, dict) or result.get('status') != 'success':
+                logger.warning(f"Failed to fetch historical data for NIFTY: {result}")
                 return
             
-            candle_data = result.get("data", result)
+            candle_data = result.get("data", {})
             if isinstance(candle_data, dict) and "open" in candle_data:
                 opens = candle_data.get("open", [])
                 highs = candle_data.get("high", [])
                 lows = candle_data.get("low", [])
                 closes = candle_data.get("close", [])
-                timestamps = candle_data.get("start_Time", candle_data.get("timestamp", []))
+                timestamps = candle_data.get("start_Time", [])
 
                 count = 0
+                candles = []
                 for i in range(len(opens)):
-                    candle = {
-                        "timestamp": datetime.fromisoformat(timestamps[i]) if isinstance(timestamps[i], str) else timestamps[i],
+                    # Handle integer timestamp or ISO string
+                    ts = timestamps[i]
+                    if isinstance(ts, (int, float)):
+                        ts_obj = datetime.fromtimestamp(ts, IST)
+                    elif isinstance(ts, str):
+                        try:
+                            ts_obj = datetime.fromisoformat(ts)
+                        except ValueError:
+                            ts_obj = datetime.now(IST)
+                    else:
+                        ts_obj = datetime.now(IST)
+
+                    candles.append({
+                        "timestamp": ts_obj,
                         "open": float(opens[i]),
                         "high": float(highs[i]),
                         "low": float(lows[i]),
                         "close": float(closes[i]),
                         "volume": 0,
-                    }
-                    self.index_engine.candles.append(candle)
+                    })
+
+                # Sort by time just in case
+                candles.sort(key=lambda x: x["timestamp"])
+
+                # Keep only the last 30 candles for the RSI warmup
+                recent_candles = candles[-30:]
+                
+                for c in recent_candles:
+                    self.index_engine.candles.append(c)
                     count += 1
                 
                 if self.index_engine.candles:
                     self.index_engine.current_candle = self.index_engine.candles.pop()
-                    self._latest_index = float(closes[-1]) if closes else 0.0
+                    self._latest_index = float(self.index_engine.current_candle['close'])
 
-                logger.info(f"🌱 Seeded {count} historical 5-min candles for NIFTY 50")
+                logger.info(f"🌱 Seeded {count} historical 5-min candles for NIFTY 50 RSI Calculation")
             else:
                 logger.warning("No candle data available for NIFTY seeding.")
         except Exception as e:
-            logger.error(f"Error seeding NIFTY candles: {e}")
+            logger.error(f"Error seeding NIFTY candles: {e}", exc_info=True)
 
     async def on_tick(self, tick: dict):
         if not self._running:
@@ -250,10 +277,10 @@ class TradingWorker:
         
         # If pattern formed, start 15 min countdown
         if pattern_formed:
-            # Check if trading is allowed (before 15:10)
+        # Check if trading is allowed (before 14:40 / 2:40 PM)
             now = datetime.now(IST)
-            if now.hour == 15 and now.minute >= 10:
-                logger.info("🚫 Time check failed - No new trades after 3:10 PM")
+            if now.time() >= __import__('datetime').time(14, 40):
+                logger.info("🚫 Time check failed - No new trades after 2:40 PM")
                 return
                 
             self._waiting_for_breakout = True
@@ -275,8 +302,8 @@ class TradingWorker:
             logger.info(f"🚀 BREAKOUT CONFIRMED! NIFTY {ltp} broke below {self._breakout_b1_low}")
             self._waiting_for_breakout = False
             
-            if now.hour == 15 and now.minute >= 10:
-                logger.info("🚫 Cannot take new position - Trading time expired")
+            if now.time() >= __import__('datetime').time(14, 40):
+                logger.info("🚫 Cannot take new position - Trading time expired (after 2:40 PM)")
                 return
             
             # Only PUT trades per user request
@@ -286,7 +313,14 @@ class TradingWorker:
         atm_strike = _nifty_atm_strike(index_price)
         logger.info(f"🔍 Looking for PUT option for ATM Strike {atm_strike}")
         
-        security_id = self.instrument_manager.get_security_id("NIFTY", float(atm_strike), "PE")
+        # Get Option Chain Security ID
+        expiry_date = self.calendar.get_expiry_str_yyyy_mm_dd()
+        security_id = self.instrument_manager.get_security_id(
+            base_symbol="NIFTY",
+            strike=float(atm_strike),
+            option_type="PE",
+            expiry_date=expiry_date
+        )
         if not security_id:
             logger.error(f"Could not resolve security ID for NIFTY {atm_strike} PE.")
             return
@@ -305,18 +339,48 @@ class TradingWorker:
             except Exception as e:
                 logger.error(f"Failed to dynamically subscribe to {security_id}: {e}")
         
+        # Fetch Option 5-min candle low for Stop Loss calculation
+        option_5m_low = 0.0
+        try:
+            from app.dhan.client import get_dhan_client
+            dhan = get_dhan_client()
+            if dhan and dhan._client:
+                today_str = datetime.now(IST).strftime("%Y-%m-%d")
+                opt_data = await dhan.intraday_minute_data(
+                    security_id=str(security_id),
+                    exchange_segment="BSE_FNO",
+                    instrument_type="OPTIDX",
+                    from_date=today_str,
+                    to_date=today_str,
+                    interval=5
+                )
+                if isinstance(opt_data, dict) and opt_data.get('status') == 'success':
+                    d = opt_data.get('data', {})
+                    lows = d.get('low', [])
+                    if lows:
+                        option_5m_low = float(lows[-1])
+                        logger.info(f"📉 Option 5M Candle Low: {option_5m_low}")
+        except Exception as e:
+            logger.error(f"Failed to fetch option candle low: {e}")
+
+        # Fallback SL if API fails
+        if option_5m_low == 0.0 and self._latest_put_ltp > 0:
+            option_5m_low = self._latest_put_ltp
+
+        calculated_sl = max(0.05, option_5m_low - 3.0)
+
         # Generate Signal to execute buy
         signal = Signal(
             symbol=f"NIFTY_{atm_strike}_PE",
             direction="BUY",
             option_type="PE",
             entry_reference=0.0, # Market price
-            stop_loss_reference=0.0, # Handled by SL tiers
+            stop_loss_reference=calculated_sl,
             signal_reason="NIFTY_5M_BREAKOUT",
             security_id=security_id
         )
         
-        logger.info(f"🎯 Firing PUT Signal for {signal.symbol} (Sec ID: {security_id})")
+        logger.info(f"🎯 Firing PUT Signal for {signal.symbol} (Sec ID: {security_id}), Initial SL: {calculated_sl}")
         
         await redis_client.set(
             "last_signal",
@@ -333,22 +397,41 @@ class TradingWorker:
         try:
             # Wait a sec for frontend to catch up before order
             await asyncio.sleep(1)
-            # Standard params for Friday (Default 60 qty)
-            quantity = 60
+            # Fixed quantity across all days
+            quantity = 130
             await self.execution_engine.process_signal(signal, quantity=quantity)
         except Exception as e:
             logger.error(f"Error processing breakout signal: {e}")
 
     async def _monitor_positions(self, ltp: float, tick_type: str, security_id: str):
+        now = datetime.now(IST)
+        is_force_close_time = now.time() >= __import__('datetime').time(15, 10)
+
         for pos in self.position_manager.get_active_positions():
+            if is_force_close_time:
+                logger.warning(f"⏰ Force closing position {pos.position_id} due to End of Day (15:10)")
+                try:
+                    await self.execution_engine.close_position(pos.position_id, self._latest_put_ltp)
+                except Exception as e:
+                    logger.error(f"Failed to force exit position {pos.position_id}: {e}")
+                continue
+
             if pos.security_id == security_id:
                 exit_reason = pos.update_price(ltp)
                 if exit_reason:
-                    logger.info(f"Closing position {pos.position_id}: {exit_reason}")
-                    try:
-                        await self.execution_engine.execute_exit(pos, exit_reason)
-                    except Exception as e:
-                        logger.error(f"Failed to exit position {pos.position_id}: {e}")
+                    if exit_reason == "PARTIAL_EXIT":
+                        logger.info(f"Selling partial quantity (65) for position {pos.position_id}")
+                        try:
+                            # Hardcoded partial exit quantity of 65 as requested
+                            await self.execution_engine.partial_close_position(pos.position_id, 65, ltp)
+                        except Exception as e:
+                            logger.error(f"Failed to partial exit position {pos.position_id}: {e}")
+                    else:
+                        logger.info(f"Closing position {pos.position_id}: {exit_reason}")
+                        try:
+                            await self.execution_engine.close_position(pos.position_id, ltp)
+                        except Exception as e:
+                            logger.error(f"Failed to full exit position {pos.position_id}: {e}")
 
     async def _publish_snapshot(self):
         try:
@@ -365,9 +448,9 @@ class TradingWorker:
 
     async def _publish_status(self, status: str):
         try:
-            await redis_client.set("worker_status", status)
-        except:
-            pass
+            await redis_client.set("worker_status", status, ex=60)
+        except Exception as e:
+            logger.error(f"Failed to publish status: {e}")
 
 _worker_instance = None
 

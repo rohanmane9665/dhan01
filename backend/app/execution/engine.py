@@ -83,11 +83,12 @@ class ExecutionEngine:
             })
 
             # Step 2: SUBMITTING -> Submit to Broker Adapter
+            exchange_segment = "NSE_FNO" if "NIFTY" in signal.symbol.upper() else "BSE_FNO"
             order_payload = {
                 "order_id": order_id,
                 "correlation_id": order_id,  # Idempotency key
                 "security_id": signal.security_id,
-                "exchange_segment": "BSE_FNO",
+                "exchange_segment": exchange_segment,
                 "transaction_type": signal.direction,
                 "quantity": signal.quantity,
                 "order_type": "MARKET",
@@ -149,7 +150,7 @@ class ExecutionEngine:
                     "order_id": sl_order_id,
                     "correlation_id": sl_order_id,
                     "security_id": signal.security_id,
-                    "exchange_segment": "BSE_FNO",
+                    "exchange_segment": exchange_segment,
                     "transaction_type": "SELL" if signal.direction == "BUY" else "BUY",
                     "quantity": signal.quantity,
                     "order_type": "STOP_LOSS_MARKET",
@@ -198,11 +199,12 @@ class ExecutionEngine:
             return {"status": "ERROR", "reason": f"Position {position_id} not found or insufficient quantity"}
 
         order_id = f"EXIT_{uuid.uuid4().hex[:8].upper()}"
+        exchange_segment = "NSE_FNO" if "NIFTY" in pos.symbol.upper() else "BSE_FNO"
         order_payload = {
             "order_id": order_id,
             "correlation_id": order_id,
             "security_id": pos.security_id,
-            "exchange_segment": "BSE_FNO",
+            "exchange_segment": exchange_segment,
             "transaction_type": "SELL",
             "quantity": quantity,
             "order_type": "MARKET",
@@ -270,11 +272,12 @@ class ExecutionEngine:
             return {"status": "ERROR", "reason": f"Position {position_id} not found"}
 
         order_id = f"EXIT_{uuid.uuid4().hex[:8].upper()}"
+        exchange_segment = "NSE_FNO" if "NIFTY" in pos.symbol.upper() else "BSE_FNO"
         order_payload = {
             "order_id": order_id,
             "correlation_id": order_id,  # Idempotency key
             "security_id": pos.security_id,
-            "exchange_segment": "BSE_FNO",
+            "exchange_segment": exchange_segment,
             "transaction_type": "SELL",
             "quantity": pos.quantity,
             "order_type": "MARKET",

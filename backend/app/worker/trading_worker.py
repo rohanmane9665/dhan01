@@ -12,8 +12,8 @@ from app.risk.manager import RiskManager
 from app.execution.position_manager import PositionManager
 from app.market.candle_engine import CandleEngine
 from app.market.validator import DataValidator
-from app.strategies.index_breakout import IndexBreakoutStrategy
 from app.strategies.models import Signal
+from app.strategies.nifty_breakout import NiftyBreakoutStrategy
 from app.reconciliation.service import ReconciliationService
 from app.scheduler.market_calendar import MarketCalendar
 from app.market.instruments import InstrumentManager
@@ -44,7 +44,7 @@ class TradingWorker:
         # Single candle engine for NIFTY 50 (5 minutes)
         self.index_engine = CandleEngine(interval_minutes=5)
 
-        self.strategy = IndexBreakoutStrategy(rsi_period=14)
+        self.strategy = NiftyBreakoutStrategy(rsi_period=14)
         self.reconciliation = ReconciliationService(self.broker, self.position_manager)
         self.calendar = MarketCalendar()
         self.instrument_manager = InstrumentManager()
@@ -121,18 +121,13 @@ class TradingWorker:
                         logger.info(f"B2 Close < B2 Open: C2 = {c_vals.get('C2')}")
                         logger.info(f"B2 High > B1 High: C3 = {c_vals.get('C3')}")
                         logger.info(f"B1 Low < B2 Low: C4 = {c_vals.get('C4')}")
-                        logger.info(f"8 < (B2 High - B1 High) < 80: C6 = {c_vals.get('C6')}")
-                        logger.info(f"8 < (B2 Low - B1 Low) < 80: C7 = {c_vals.get('C7')}")
-                        logger.info(f"5 < (B1 Close - B1 Open) < 100: C8 = {c_vals.get('C8')}")
-                        logger.info(f"4 < (B2 Open - B2 Close) < 100: C9 = {c_vals.get('C9')}")
-                        logger.info(f"(B1 High - B1 Low) < 150: C10 = {c_vals.get('C10')}")
-                        logger.info(f"(B2 High - B2 Low) < 150: C11 = {c_vals.get('C11')}")
+                        logger.info(f"(B2 High - B1 Low) < 22: C5 = {c_vals.get('C5')}")
                         b2_rsi = c_vals.get('b2_rsi')
                         b2_rsi_str = f"{b2_rsi:.2f}" if b2_rsi is not None else "N/A"
                         logger.info(f"B2 RSI(14) ({b2_rsi_str}) > 40: C12 = {c_vals.get('C12')}")
-                        logger.info(f"All conditions (C1-C4, C6-C12) met: {pattern_formed}")
+                        logger.info(f"All conditions (C1-C5, C12) met: {pattern_formed}")
                 else:
-                    logger.info("Index: Not enough data for C1-C12 evaluation")
+                    logger.info("Index: Not enough data for C1-C5, C12 evaluation")
                 
                 logger.info(f"NIFTY: {self._latest_index}, PUT Price: {self._latest_put_ltp}")
                 
@@ -333,10 +328,11 @@ class TradingWorker:
                 from dhanhq import MarketFeed as DhanMF
                 instruments = getattr(self.market_feed, "_instruments", []).copy()
                 type_map = getattr(self.market_feed, "_instrument_type_map", {}).copy()
-                instruments.append((DhanMF.BSE_FNO, str(security_id), DhanMF.Ticker))
+                # NIFTY options use NSE_FNO
+                instruments.append((DhanMF.NSE_FNO, str(security_id), DhanMF.Ticker))
                 type_map[str(security_id)] = "PE"
                 self.market_feed.update_instruments(instruments, type_map)
-                logger.info(f"📡 Dynamically subscribed to PUT {security_id}")
+                logger.info(f"📡 Dynamically subscribed to PUT {security_id} on NSE_FNO")
             except Exception as e:
                 logger.error(f"Failed to dynamically subscribe to {security_id}: {e}")
         
@@ -349,7 +345,7 @@ class TradingWorker:
                 today_str = datetime.now(IST).strftime("%Y-%m-%d")
                 opt_data = await dhan.intraday_minute_data(
                     security_id=str(security_id),
-                    exchange_segment="BSE_FNO",
+                    exchange_segment="NSE_FNO",
                     instrument_type="OPTIDX",
                     from_date=today_str,
                     to_date=today_str,

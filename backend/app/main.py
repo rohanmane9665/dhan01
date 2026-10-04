@@ -50,10 +50,25 @@ app = FastAPI(
 # Register custom exception handlers
 setup_exception_handlers(app)
 
+# Base secure origins
+allowed_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://43.205.71.25:3000",
+    "https://dhanportfolio.vercel.app"
+]
+
+# Add any custom ones from .env
+if settings.FRONTEND_URL:
+    for origin in settings.FRONTEND_URL.split(","):
+        clean_origin = origin.strip().rstrip("/")
+        if clean_origin and clean_origin not in allowed_origins:
+            allowed_origins.append(clean_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

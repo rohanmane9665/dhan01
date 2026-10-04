@@ -26,7 +26,7 @@ services:
     build: 
       context: ./frontend
       args:
-        - VITE_API_URL=http://43.205.71.25:8000/api/v1
+        - VITE_API_URL=https://dhan-rohan-backend.duckdns.org/api/v1
     ports:
       - "3000:80"
     depends_on:
@@ -80,6 +80,21 @@ services:
       retries: 5
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:

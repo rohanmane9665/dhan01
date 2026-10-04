@@ -62,4 +62,7 @@ export const getHistoricalCandles = (secId, from, to, opts = {}) => {
   return api.get(`/dhan/historical-candles?${params}`).then(r => r.data);
 };
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+export const updateDhanToken = (token) => api.put('/settings/dhan-token', { dhan_access_token: token }).then(r => r.data);
+
 export default api;

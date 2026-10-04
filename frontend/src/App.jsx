@@ -9,6 +9,7 @@ import Strategy      from './pages/Strategy';
 import AIInsights    from './pages/AIInsights';
 import Logs          from './pages/Logs';
 import Login         from './pages/Login';
+import SystemSettings from './pages/SystemSettings';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 
@@ -31,6 +32,7 @@ function App() {
                     <Route path="/strategy"     element={<Strategy />} />
                     <Route path="/ai-insights"  element={<AIInsights />} />
                     <Route path="/logs"         element={<Logs />} />
+                    <Route path="/settings"     element={<SystemSettings />} />
                     <Route path="*"             element={<Navigate to="/" replace />} />
                   </Routes>
                 </DashboardLayout>

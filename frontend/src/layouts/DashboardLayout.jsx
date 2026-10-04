@@ -82,10 +82,11 @@ const DashboardLayout = ({ children }) => {
           <SidebarItem icon={Activity}    label="Dashboard"    path="/"             active={currentPath === '/'} />
           <SidebarItem icon={TrendingUp}  label="Live Trading"  path="/live-trading" active={currentPath === '/live-trading'} />
           <SidebarItem icon={BarChart2}   label="P&L Analytics" path="/analytics"    active={currentPath === '/analytics'} />
-          <SidebarItem icon={Settings}    label="Strategy"      path="/strategy"     active={currentPath === '/strategy'} />
+          <SidebarItem icon={List}        label="Strategy"      path="/strategy"     active={currentPath === '/strategy'} />
           <SidebarItem icon={Shield}      label="Risk Controls" path="/risk"         active={currentPath === '/risk'} />
           <SidebarItem icon={Cpu}         label="AI Insights"   path="/ai-insights"  active={currentPath === '/ai-insights'} />
           <SidebarItem icon={FileText}    label="Logs"          path="/logs"         active={currentPath === '/logs'} />
+          <SidebarItem icon={Settings}    label="Settings"      path="/settings"     active={currentPath === '/settings'} />
         </div>
         
         <div className="p-4 border-t border-gray-800 space-y-2">

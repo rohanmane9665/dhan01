@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, trading, positions, streaming, analytics, risk, logs, auth_routes, dhan_data
+from app.api.routes import health, trading, positions, streaming, analytics, risk, logs, auth_routes, dhan_data, settings_routes
 from app.api.auth import verify_admin_token
 from fastapi import Depends
 from app.core.config import settings
@@ -60,6 +60,7 @@ app.add_middleware(
 
 app.include_router(health.router, tags=["health"])
 app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(settings_routes.router, prefix="/api/v1/settings", tags=["settings"], dependencies=[Depends(verify_admin_token)])
 
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["trading"], dependencies=[Depends(verify_admin_token)])
 app.include_router(positions.router, prefix="/api/v1/positions", tags=["positions"], dependencies=[Depends(verify_admin_token)])

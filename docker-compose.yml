@@ -23,7 +23,10 @@ services:
       start_period: 15s
 
   frontend:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      args:
+        - VITE_API_URL=http://43.205.71.25:8000/api/v1
     ports:
       - "3000:80"
     depends_on:

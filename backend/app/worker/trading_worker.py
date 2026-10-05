@@ -181,15 +181,26 @@ class TradingWorker:
             for _ in range(0, total_days, chunk_size):
                 current_from = current_to - timedelta(days=chunk_size)
                 
-                # Fetch chunk
+                # Fetch chunk (Try IDX first for NSE)
                 res = await dhan.intraday_minute_data(
                     security_id="13",
-                    exchange_segment="IDX_I",  # Use IDX_I (Indices) for NIFTY 50
+                    exchange_segment="IDX",
                     instrument_type="INDEX",
                     from_date=current_from.strftime("%Y-%m-%d"),
                     to_date=current_to.strftime("%Y-%m-%d"),
                     interval=5
                 )
+                
+                # Fallback to IDX_I if IDX fails
+                if not res or res.get('status') != 'success' or not res.get('data'):
+                    res = await dhan.intraday_minute_data(
+                        security_id="13",
+                        exchange_segment="IDX_I",
+                        instrument_type="INDEX",
+                        from_date=current_from.strftime("%Y-%m-%d"),
+                        to_date=current_to.strftime("%Y-%m-%d"),
+                        interval=5
+                    )
                 
                 if res and res.get('status') == 'success' and res.get('data'):
                     data = res['data']

@@ -215,19 +215,12 @@ class TradingWorker:
                 # Keep only the last 30 candles for the RSI warmup
                 recent_candles = candles[-30:]
                 
-                if recent_candles:
-                    new_df = pd.DataFrame(recent_candles)
-                    if self.index_engine.candles.empty:
-                        self.index_engine.candles = new_df
-                    else:
-                        self.index_engine.candles = pd.concat([self.index_engine.candles, new_df], ignore_index=True)
-                    count = len(recent_candles)
+                for c in recent_candles:
+                    self.index_engine.candles.append(c)
+                    count += 1
                 
-                if not self.index_engine.candles.empty:
-                    # Pop the last one to become current_candle
-                    last_row = self.index_engine.candles.iloc[-1].to_dict()
-                    self.index_engine.candles = self.index_engine.candles.iloc[:-1]
-                    self.index_engine.current_candle = last_row
+                if self.index_engine.candles:
+                    self.index_engine.current_candle = self.index_engine.candles.pop()
                     self._latest_index = float(self.index_engine.current_candle['close'])
 
                 logger.info(f"🌱 Seeded {count} historical 5-min candles for NIFTY 50 RSI Calculation")

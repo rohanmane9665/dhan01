@@ -159,9 +159,9 @@ class TradingWorker:
 
             logger.info("Seeding CandleEngine with historical NIFTY data for RSI...")
             
-            # Fetch last 4 days (to safely cover weekends/holidays) to get the last working day's candles
+            # Fetch last 21 days (to safely ensure we get exactly 15 trading days like the text explains)
             to_date = datetime.now(IST)
-            from_date = to_date - timedelta(days=4)
+            from_date = to_date - timedelta(days=21)
             
             from_date_str = from_date.strftime("%Y-%m-%d")
             to_date_str = to_date.strftime("%Y-%m-%d")
@@ -240,8 +240,8 @@ class TradingWorker:
                 # Sort by time just in case
                 candles.sort(key=lambda x: x["timestamp"])
 
-                # Keep up to 100 candles to provide just enough history for the RSI function to calculate properly
-                recent_candles = candles[-100:]
+                # Keep up to 1500 candles to provide the massive history needed to perfectly warm up Wilder's Smoothing
+                recent_candles = candles[-1500:]
                 
                 for c in recent_candles:
                     self.index_engine.candles.append(c)

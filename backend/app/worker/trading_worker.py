@@ -159,15 +159,15 @@ class TradingWorker:
 
             logger.info("Seeding CandleEngine with historical NIFTY data for RSI...")
             
-            # Fetch last 5 days to ensure we have enough previous-day candles for RSI
+            # Fetch last 15 days to ensure RSI is fully warmed up and accurate (matching mahadevvv.py)
             to_date = datetime.now(IST)
-            from_date = to_date - timedelta(days=5)
+            from_date = to_date - timedelta(days=15)
             
             from_date_str = from_date.strftime("%Y-%m-%d")
             to_date_str = to_date.strftime("%Y-%m-%d")
 
             # 13 is NIFTY 50 Index on Dhan
-            # Using intraday_minute_data which accepts from/to date
+            # Using historical_minute_data which accepts from/to date
             result = await dhan.historical_minute_data(
                 security_id="13",
                 exchange_segment="IDX_I",  # Try IDX_I first
@@ -239,8 +239,8 @@ class TradingWorker:
                 # Sort by time just in case
                 candles.sort(key=lambda x: x["timestamp"])
 
-                # Keep only the last 30 candles for the RSI warmup
-                recent_candles = candles[-30:]
+                # Keep up to 500 candles for a very accurate RSI warmup (like mahadevvv.py)
+                recent_candles = candles[-500:]
                 
                 for c in recent_candles:
                     self.index_engine.candles.append(c)

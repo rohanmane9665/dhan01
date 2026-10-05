@@ -164,14 +164,37 @@ class TradingWorker:
 
             # 13 is NIFTY 50 Index on Dhan
             # Using intraday_minute_data which accepts from/to date
-            result = await dhan.intraday_minute_data(
+            result = await dhan.historical_minute_data(
                 security_id="13",
-                exchange_segment="IDX",  # NIFTY is on NSE (IDX), not BSE (IDX_I)
+                exchange_segment="IDX_I",  # Try IDX_I first
                 instrument_type="INDEX",
                 from_date=from_date_str,
                 to_date=to_date_str,
                 interval=5
             )
+            
+            # If it fails, fallback to NSE IDX
+            if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
+                result = await dhan.historical_minute_data(
+                    security_id="13",
+                    exchange_segment="IDX",
+                    instrument_type="INDEX",
+                    from_date=from_date_str,
+                    to_date=to_date_str,
+                    interval=5
+                )
+                
+            # If it STILL fails, fallback to intraday minute data for today only
+            if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
+                logger.warning("Falling back to intraday data for today only...")
+                result = await dhan.intraday_minute_data(
+                    security_id="13",
+                    exchange_segment="IDX_I",
+                    instrument_type="INDEX",
+                    from_date=to_date_str,
+                    to_date=to_date_str,
+                    interval=5
+                )
             
             if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
                 logger.warning(f"Failed to fetch historical data for NIFTY (Check credentials or ID): {result}")

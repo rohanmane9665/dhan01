@@ -128,7 +128,7 @@ class TradingWorker:
                             f"[C2 (B2 Cl<Op): {c_vals.get('C2')}] "
                             f"[C3 (B2 H>B1 H): {c_vals.get('C3')}] "
                             f"[C4 (B1 L<B2 L): {c_vals.get('C4')}] "
-                            f"[C5 (Diff<22): {c_vals.get('C5')}] "
+                            f"[C5 (Diff<25): {c_vals.get('C5')}] "
                             f"[C12 (B2 RSI {b2_rsi_str} > 40): {c_vals.get('C12')}] "
                             f"[LIVE RSI: {live_rsi_str}] "
                             f"| OVERALL MET: {pattern_formed}"

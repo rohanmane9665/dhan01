@@ -80,7 +80,7 @@ class NiftyBreakoutStrategy(BaseStrategy):
             'C2': B2['close'] < B2['open'],
             'C3': B2['high'] > B1['high'],
             'C4': B1['low'] < B2['low'],
-            'C5': (B2['high'] - B1['low']) < 22,
+            'C5': (B2['high'] - B1['low']) < 25,
             'C12': C12,
             'b2_rsi': b2_rsi,
             'live_rsi': live_rsi,

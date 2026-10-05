@@ -164,51 +164,63 @@ class TradingWorker:
             logger.info("Seeding CandleEngine with historical NIFTY data for RSI...")
             
             # Fetch last 21 days (to safely ensure we get exactly 15 trading days like the text explains)
-            to_date = datetime.now(IST)
-            from_date = to_date - timedelta(days=21)
+            # Dhan API strictly limits intraday_minute_data to 5 days per request.
+            # We need 21 days, so we must chunk the requests into 5-day blocks.
+            total_days = 21
+            chunk_size = 5
             
-            from_date_str = from_date.strftime("%Y-%m-%d")
-            to_date_str = to_date.strftime("%Y-%m-%d")
-
-            # Using intraday_minute_data because DhanHQ SDK uses this for all minute data including past days
-            # Try NSE (IDX) first since NIFTY 50 is NSE
-            result = await dhan.intraday_minute_data(
-                security_id="13",
-                exchange_segment="IDX",
-                instrument_type="INDEX",
-                from_date=from_date_str,
-                to_date=to_date_str,
-                interval=5
-            )
+            all_opens = []
+            all_highs = []
+            all_lows = []
+            all_closes = []
+            all_vols = []
+            all_times = []
             
-            # If it fails, try BSE (IDX_I)
-            if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
-                result = await dhan.intraday_minute_data(
+            # Fetch backwards from today
+            current_to = datetime.now(IST)
+            for _ in range(0, total_days, chunk_size):
+                current_from = current_to - timedelta(days=chunk_size)
+                
+                # Fetch chunk
+                res = await dhan.intraday_minute_data(
                     security_id="13",
-                    exchange_segment="IDX_I",
+                    exchange_segment="IDX_I",  # Use IDX_I (Indices) for NIFTY 50
                     instrument_type="INDEX",
-                    from_date=from_date_str,
-                    to_date=to_date_str,
+                    from_date=current_from.strftime("%Y-%m-%d"),
+                    to_date=current_to.strftime("%Y-%m-%d"),
                     interval=5
                 )
                 
-            # If it STILL fails, try the same with datetime strings instead of just dates
-            if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
-                from_dt_str = from_date.strftime("%Y-%m-%d %H:%M:%S")
-                to_dt_str = to_date.strftime("%Y-%m-%d %H:%M:%S")
-                result = await dhan.intraday_minute_data(
-                    security_id="13",
-                    exchange_segment="IDX",
-                    instrument_type="INDEX",
-                    from_date=from_dt_str,
-                    to_date=to_dt_str,
-                    interval=5
-                )
-            
-            if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
-                logger.warning(f"Failed to fetch historical data for NIFTY (Check credentials or ID): {result}")
+                if res and res.get('status') == 'success' and res.get('data'):
+                    data = res['data']
+                    # API returns chronological order, but since we are fetching backwards, 
+                    # we must prepend the new older chunk to the lists.
+                    all_opens = data.get('open', []) + all_opens
+                    all_highs = data.get('high', []) + all_highs
+                    all_lows = data.get('low', []) + all_lows
+                    all_closes = data.get('close', []) + all_closes
+                    all_vols = data.get('volume', []) + all_vols
+                    all_times = data.get('start_Time', []) + all_times
+                
+                current_to = current_from - timedelta(days=1)
+                await asyncio.sleep(0.5) # Prevent rate limiting
+                
+            if not all_opens:
+                logger.warning("Failed to fetch ANY historical data chunks for NIFTY. Check credentials/limits.")
                 return
-            
+                
+            # Create a mock result object to match the expected format
+            result = {
+                'status': 'success',
+                'data': {
+                    'open': all_opens,
+                    'high': all_highs,
+                    'low': all_lows,
+                    'close': all_closes,
+                    'volume': all_vols,
+                    'start_Time': all_times
+                }
+            }
             candle_data = result.get("data", {})
             if isinstance(candle_data, dict) and "open" in candle_data:
                 opens = candle_data.get("open", [])

@@ -213,7 +213,8 @@ class TradingWorker:
                     all_lows = data.get('low', []) + all_lows
                     all_closes = data.get('close', []) + all_closes
                     all_vols = data.get('volume', []) + all_vols
-                    all_times = data.get('start_Time', []) + all_times
+                    # Intraday minute API returns 'timestamp', not 'start_Time'
+                    all_times = data.get('timestamp', []) + all_times
                 else:
                     err2 = res.get('remarks', res) if res else "None"
                     logger.error(f"FATAL: Failed to fetch chunk with IDX_I (BSE) as well: {err2}")
@@ -234,7 +235,7 @@ class TradingWorker:
                     'low': all_lows,
                     'close': all_closes,
                     'volume': all_vols,
-                    'start_Time': all_times
+                    'timestamp': all_times
                 }
             }
             candle_data = result.get("data", {})
@@ -243,7 +244,7 @@ class TradingWorker:
                 highs = candle_data.get("high", [])
                 lows = candle_data.get("low", [])
                 closes = candle_data.get("close", [])
-                timestamps = candle_data.get("start_Time", [])
+                timestamps = candle_data.get("timestamp", [])
 
                 count = 0
                 candles = []

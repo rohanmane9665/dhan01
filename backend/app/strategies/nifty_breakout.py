@@ -67,6 +67,14 @@ class NiftyBreakoutStrategy(BaseStrategy):
             b2_rsi = None
             C12 = False
 
+        # Also calculate LIVE RSI (including the currently forming candle) to show dynamic updates every 30s
+        all_closes = df['close']
+        if len(all_closes) >= 15:
+            live_rsi_series = self.calculate_rsi(all_closes)
+            live_rsi = live_rsi_series.iloc[-1] if live_rsi_series is not None else None
+        else:
+            live_rsi = None
+
         c_vals = {
             'C1': B1['close'] > B1['open'],
             'C2': B2['close'] < B2['open'],
@@ -75,6 +83,7 @@ class NiftyBreakoutStrategy(BaseStrategy):
             'C5': (B2['high'] - B1['low']) < 22,
             'C12': C12,
             'b2_rsi': b2_rsi,
+            'live_rsi': live_rsi,
             'b1_low': B1['low']
         }
 

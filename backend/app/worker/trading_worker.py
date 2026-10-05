@@ -166,37 +166,38 @@ class TradingWorker:
             from_date_str = from_date.strftime("%Y-%m-%d")
             to_date_str = to_date.strftime("%Y-%m-%d")
 
-            # 13 is NIFTY 50 Index on Dhan
-            # Using historical_minute_data which accepts from/to date
-            result = await dhan.historical_minute_data(
+            # Using intraday_minute_data because DhanHQ SDK uses this for all minute data including past days
+            # Try NSE (IDX) first since NIFTY 50 is NSE
+            result = await dhan.intraday_minute_data(
                 security_id="13",
-                exchange_segment="IDX_I",  # Try IDX_I first
+                exchange_segment="IDX",
                 instrument_type="INDEX",
                 from_date=from_date_str,
                 to_date=to_date_str,
                 interval=5
             )
             
-            # If it fails, fallback to NSE IDX
+            # If it fails, try BSE (IDX_I)
             if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
-                result = await dhan.historical_minute_data(
+                result = await dhan.intraday_minute_data(
                     security_id="13",
-                    exchange_segment="IDX",
+                    exchange_segment="IDX_I",
                     instrument_type="INDEX",
                     from_date=from_date_str,
                     to_date=to_date_str,
                     interval=5
                 )
                 
-            # If it STILL fails, fallback to intraday minute data for today only
+            # If it STILL fails, try the same with datetime strings instead of just dates
             if not isinstance(result, dict) or result.get('status') != 'success' or not result.get('data'):
-                logger.warning("Falling back to intraday data for today only...")
+                from_dt_str = from_date.strftime("%Y-%m-%d %H:%M:%S")
+                to_dt_str = to_date.strftime("%Y-%m-%d %H:%M:%S")
                 result = await dhan.intraday_minute_data(
                     security_id="13",
-                    exchange_segment="IDX_I",
+                    exchange_segment="IDX",
                     instrument_type="INDEX",
-                    from_date=to_date_str,
-                    to_date=to_date_str,
+                    from_date=from_dt_str,
+                    to_date=to_dt_str,
                     interval=5
                 )
             

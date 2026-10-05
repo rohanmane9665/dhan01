@@ -193,6 +193,8 @@ class TradingWorker:
                 
                 # Fallback to IDX_I if IDX fails
                 if not res or res.get('status') != 'success' or not res.get('data'):
+                    err1 = res.get('remarks', res) if res else "None"
+                    logger.warning(f"Failed to fetch chunk with IDX (NSE): {err1}. Trying IDX_I...")
                     res = await dhan.intraday_minute_data(
                         security_id="13",
                         exchange_segment="IDX_I",
@@ -212,7 +214,10 @@ class TradingWorker:
                     all_closes = data.get('close', []) + all_closes
                     all_vols = data.get('volume', []) + all_vols
                     all_times = data.get('start_Time', []) + all_times
-                
+                else:
+                    err2 = res.get('remarks', res) if res else "None"
+                    logger.error(f"FATAL: Failed to fetch chunk with IDX_I (BSE) as well: {err2}")
+                    
                 current_to = current_from - timedelta(days=1)
                 await asyncio.sleep(0.5) # Prevent rate limiting
                 

@@ -181,6 +181,27 @@ class DhanClient:
             expiry_code,
         )
 
+    async def historical_minute_data(
+        self,
+        security_id: str,
+        exchange_segment: str,
+        instrument_type: str,
+        from_date: str,
+        to_date: str,
+        interval: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Fetch historical minute-level OHLCV candles.
+        """
+        return await self._run_async(
+            "historical_minute_data",
+            security_id,
+            exchange_segment,
+            instrument_type,
+            from_date,
+            to_date,
+        )
+
     async def intraday_minute_data(
         self,
         security_id: str,

@@ -117,15 +117,19 @@ class TradingWorker:
                 if not df.empty and len(df) >= 3:
                     pattern_formed, b1_low, c_vals = self.strategy.evaluate(df)
                     if c_vals:
-                        logger.info(f"B1 Close > B1 Open: C1 = {c_vals.get('C1')}")
-                        logger.info(f"B2 Close < B2 Open: C2 = {c_vals.get('C2')}")
-                        logger.info(f"B2 High > B1 High: C3 = {c_vals.get('C3')}")
-                        logger.info(f"B1 Low < B2 Low: C4 = {c_vals.get('C4')}")
-                        logger.info(f"(B2 High - B1 Low) < 22: C5 = {c_vals.get('C5')}")
                         b2_rsi = c_vals.get('b2_rsi')
                         b2_rsi_str = f"{b2_rsi:.2f}" if b2_rsi is not None else "N/A"
-                        logger.info(f"B2 RSI(14) ({b2_rsi_str}) > 40: C12 = {c_vals.get('C12')}")
-                        logger.info(f"All conditions (C1-C5, C12) met: {pattern_formed}")
+                        
+                        log_str = (
+                            f"[C1 (B1 Cl>Op): {c_vals.get('C1')}] "
+                            f"[C2 (B2 Cl<Op): {c_vals.get('C2')}] "
+                            f"[C3 (B2 H>B1 H): {c_vals.get('C3')}] "
+                            f"[C4 (B1 L<B2 L): {c_vals.get('C4')}] "
+                            f"[C5 (Diff<22): {c_vals.get('C5')}] "
+                            f"[C12 (RSI {b2_rsi_str} > 40): {c_vals.get('C12')}] "
+                            f"| OVERALL MET: {pattern_formed}"
+                        )
+                        logger.info(log_str)
                 else:
                     logger.info("Index: Not enough data for C1-C5, C12 evaluation")
                 

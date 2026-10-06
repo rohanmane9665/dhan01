@@ -19,7 +19,7 @@ export default function LiveTrading() {
   const { data: sse, connected } = useSSE();
   const { data: positions, loading, refetch } = useFetch(getPositions, 2000);
 
-  const sensex  = sse?.sensex  || 0;
+  const sensex  = sse?.nifty   || 0;
   const ceLtp   = sse?.ce_ltp  || 0;
   const peLtp   = sse?.pe_ltp  || 0;
 
@@ -49,7 +49,7 @@ export default function LiveTrading() {
       {/* Market Ticker */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: 'SENSEX', value: sensex, cls: 'text-blue-300' },
+          { label: 'NIFTY 50', value: sensex, cls: 'text-blue-300' },
           { label: 'CE LTP', value: ceLtp,  cls: 'text-green-400' },
           { label: 'PE LTP', value: peLtp,  cls: 'text-red-400' },
         ].map(({ label, value, cls }) => (

@@ -15,7 +15,7 @@ export default function AIInsights() {
   const safeM   = risk?.reconciliation_safe_mode ?? false;
 
   const analystInsight = trades === 0
-    ? 'No trades executed yet this session. Monitoring market for5-min breakout pattern on NIFTY options.'
+    ? 'No trades executed yet this session. Monitoring market for 5-min breakout pattern on NIFTY options.'
     : `Strategy has completed ${trades} trade${trades > 1 ? 's' : ''} today with a ${winRate}% win rate. ` +
       `Current daily P&L: ${pnl !== null ? (pnl >= 0 ? '+' : '') + '₹' + pnl.toFixed(2) : '—'}.`;
 

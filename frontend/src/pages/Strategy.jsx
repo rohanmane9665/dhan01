@@ -5,7 +5,7 @@ import { Badge } from '../components/ui';
 const STRATEGY_PARAMS = [
   { group: 'Instrument', params: [
     ['Exchange', 'BSE FNO'],
-    ['Underlying', 'SENSEX Index'],
+    ['Underlying', 'NIFTY 50 Index'],
     ['Option Type', 'CE and PE'],
     ['Product', 'INTRADAY'],
   ]},
@@ -15,7 +15,7 @@ const STRATEGY_PARAMS = [
     ['RSI Threshold', '59.99'],
     ['RSI Pattern', 'iloc[-4] < 59.99, iloc[-3] < 59.99, iloc[-2] > 59.99'],
     ['Entry Condition', 'LTP > iloc[-2] High (breakout)'],
-    ['Strike Selection', 'ATM = ceil(SENSEX / 100) × 100'],
+    ['Strike Selection', 'ATM = ceil(NIFTY / 100) × 100'],
   ]},
   { group: 'Risk Management', params: [
     ['Initial Stop Loss', 'iloc[-2] Low of option candle'],
@@ -36,7 +36,7 @@ export default function Strategy() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Strategy Configuration</h2>
-          <p className="text-xs text-gray-500 mt-0.5">SENSEX Options 15-Min RSI Breakout — Read-only view</p>
+          <p className="text-xs text-gray-500 mt-0.5">NIFTY Options 5-Min Breakout — Read-only view</p>
         </div>
         <Badge variant="blue">v2.0.0</Badge>
       </div>

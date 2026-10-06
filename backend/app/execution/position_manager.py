@@ -1,8 +1,11 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+import pytz
 
 logger = logging.getLogger(__name__)
+IST = pytz.timezone("Asia/Kolkata")
+
 
 class Position:
     """
@@ -46,13 +49,34 @@ class Position:
         self.target_1 = self.entry_price + (2 * self.risk_diff)
         self.target_1_hit = False
         
+        # interim 15-pt SL; real SL is set after the entry candle closes
+        self.MAX_SL = 15
+        self.stop_loss = self.initial_stop_loss = self.entry_price - self.MAX_SL
+        self.risk_diff = self.MAX_SL
+        self.target_1 = 10**9          # T1 stays OFF until real SL is set
+        self.sl_finalized = False
+        _n = datetime.now(IST)
+        self.entry_bucket = _n.replace(minute=_n.minute // 5 * 5, second=0, microsecond=0)
+        
         # Max tracked level for trailing
         self.current_trail_level = 0
+
+    def finalize_sl(self, candle_low):
+        if candle_low and candle_low > 0:
+            base = min(candle_low, self.entry_price)
+            self.stop_loss = max(base - 3, self.entry_price - self.MAX_SL)
+        else:
+            self.stop_loss = self.entry_price - self.MAX_SL
+        self.initial_stop_loss = self.stop_loss
+        self.risk_diff = self.entry_price - self.stop_loss
+        self.target_1 = self.entry_price + 2 * self.risk_diff
+        self.sl_finalized = True
 
     def update_price(self, current_price: float) -> Optional[str]:
         """
         Updates LTP, handles Partial Exits at Target 1, and updates Trailing SL.
         Returns:
+        
             - 'PARTIAL_EXIT' if target 1 is hit.
             - exit_reason string if full close.
             - None if no action.

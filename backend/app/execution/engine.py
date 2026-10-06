@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -28,7 +29,31 @@ class ExecutionEngine:
         self.broker = broker_adapter
         self.risk_manager = risk_manager
         self.position_manager = position_manager
+    async def process_signal(self, signal: Signal, quantity: int = None) -> Dict[str, Any]:
+        if quantity:
+            signal.quantity = int(quantity)      # 130
+        return await self.execute_signal(signal)
 
+    async def _resolve_fill(self, broker_resp, fallback=0.0):
+        """Works for paper (FILLED) and live Dhan (only orderId returned)."""
+        if broker_resp.get("status") != "success":
+            return False, 0.0, None
+        d = broker_resp.get("data") or {}
+        oid = str(d.get("orderId", ""))
+        if d.get("orderStatus") == "FILLED" and d.get("tradedPrice"):
+            return True, float(d["tradedPrice"]), oid
+        for _ in range(5):                       # trade book can lag
+            await asyncio.sleep(1)
+            try:
+                tb = await self.broker.get_trade_book(oid)
+            except Exception:
+                tb = []
+            q = sum(float(t.get("tradedQuantity", 0)) for t in tb)
+            if q > 0:
+                px = sum(float(t.get("tradedPrice", 0)) * float(t.get("tradedQuantity", 0)) for t in tb) / q
+                return True, px, oid
+        return True, float(fallback or 0.0), oid  # order IS live, never abandon it
+        
     async def execute_signal(self, signal: Signal) -> Dict[str, Any]:
         order_id = f"ORD_{uuid.uuid4().hex[:8].upper()}"
         active_count = len(self.position_manager.get_active_positions())
@@ -101,11 +126,23 @@ class ExecutionEngine:
             broker_resp = await self.broker.place_order(order_payload)
 
             # Step 3: SUBMITTED -> Verify Broker Fill Confirmation
-            status = broker_resp.get("status")
-            resp_data = broker_resp.get("data", {})
+            ok, fill_price, _oid = await self._resolve_fill(broker_resp, signal.entry_reference)
+            resp_data = {"orderId": _oid or order_id}
+            status = "success" if ok else "failure"
 
-            if status == "success" and resp_data.get("orderStatus") == "FILLED":
-                fill_price = float(resp_data.get("tradedPrice", signal.entry_reference))
+            # skip rule: option too cheap (or no fill price) -> sell back immediately
+            if ok and signal.direction == "BUY" and fill_price < 20:
+                logger.warning(f"Fill {fill_price} < 20 - selling back, trade skipped")
+                await self.broker.place_order({
+                    **order_payload,
+                    "transaction_type": "SELL",
+                    "order_id": f"{order_id}_X",
+                    "correlation_id": f"{order_id}_X"
+                })
+                await order_repo.update_status(order_id, "REJECTED", _oid or order_id)
+                return {"order_id": order_id, "status": "REJECTED", "reason": "fill_price_below_20"}
+
+            if ok:
                 broker_order_id = str(resp_data.get("orderId", order_id))
 
                 await order_repo.update_status(order_id, "FILLED", broker_order_id)
@@ -143,31 +180,6 @@ class ExecutionEngine:
                     "current_sl": signal.stop_loss_reference,
                     "status": "OPEN"
                 })
-
-                # Step 5: Place Broker-Side SL-M Order
-                sl_order_id = f"SL_{uuid.uuid4().hex[:8].upper()}"
-                sl_payload = {
-                    "order_id": sl_order_id,
-                    "correlation_id": sl_order_id,
-                    "security_id": signal.security_id,
-                    "exchange_segment": exchange_segment,
-                    "transaction_type": "SELL" if signal.direction == "BUY" else "BUY",
-                    "quantity": signal.quantity,
-                    "order_type": "STOP_LOSS_MARKET",
-                    "product_type": "INTRADAY",
-                    "price": 0.0,
-                    "trigger_price": signal.stop_loss_reference,
-                    "reference_price": signal.stop_loss_reference
-                }
-                
-                logger.info(f"Placing Broker-side SL-M for {pos_id} at {signal.stop_loss_reference}")
-                sl_resp = await self.broker.place_order(sl_payload)
-                if sl_resp.get("status") == "success":
-                    logger.info(f"Broker-side SL-M {sl_order_id} placed successfully.")
-                    await event_repo.log_system_event("SL_ORDER_PLACED", "INFO", f"Broker SL-M {sl_order_id} placed at {signal.stop_loss_reference}")
-                else:
-                    logger.error(f"Failed to place broker-side SL-M: {sl_resp.get('remarks')}")
-                    await event_repo.log_system_event("SL_ORDER_FAILED", "ERROR", f"Failed to place SL-M {sl_order_id}: {sl_resp.get('remarks')}")
 
                 self.risk_manager.record_trade_execution()
                 await event_repo.log_system_event("POSITION_OPENED", "INFO", f"Opened {pos_id} for {signal.symbol} at {fill_price}")

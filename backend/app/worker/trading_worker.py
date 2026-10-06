@@ -335,7 +335,7 @@ class TradingWorker:
         # If pattern formed, start 15 min countdown
         if pattern_formed and not self.position_manager.get_active_positions() \
                 and not self._waiting_for_breakout:
-            key = str(df.iloc[-2].name)
+            key = str(df.iloc[-2]['timestamp'])
             if key == getattr(self, "_last_traded_key", None):
                 return
             self._pending_key = key

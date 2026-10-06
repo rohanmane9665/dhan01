@@ -55,6 +55,7 @@ class Position:
         self.risk_diff = self.MAX_SL
         self.target_1 = 10**9          # T1 stays OFF until real SL is set
         self.sl_finalized = False
+        self.trailed_sl = False
         _n = datetime.now(IST)
         self.entry_bucket = _n.replace(minute=_n.minute // 5 * 5, second=0, microsecond=0)
         
@@ -107,8 +108,8 @@ class Position:
                     if new_sl > self.stop_loss:
                         old_sl = self.stop_loss
                         self.stop_loss = new_sl
+                        self.trailed_sl = True
                         logger.info(f"📈 Trailing SL Tier {n} reached at {current_price}! SL updated: {old_sl} -> {self.stop_loss}")
-
         return None
 
     @property

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 def _nifty_atm_strike(price: float) -> int:
-    return round(price / 50) * 50
+    return int(math.ceil(price / 100) * 100)
 
 class TradingWorker:
     """
@@ -333,7 +333,13 @@ class TradingWorker:
         pattern_formed, b1_low, _ = self.strategy.evaluate(df)
         
         # If pattern formed, start 15 min countdown
-        if pattern_formed:
+        if pattern_formed and not self.position_manager.get_active_positions() \
+                and not self._waiting_for_breakout:
+            key = str(df.iloc[-2].name)
+            if key == getattr(self, "_last_traded_key", None):
+                return
+            self._pending_key = key
+                    
         # Check if trading is allowed (before 14:40 / 2:40 PM)
             now = datetime.now(IST)
             if now.time() >= __import__('datetime').time(14, 40):
@@ -362,8 +368,9 @@ class TradingWorker:
             if now.time() >= __import__('datetime').time(14, 40):
                 logger.info("🚫 Cannot take new position - Trading time expired (after 2:40 PM)")
                 return
-            
+
             # Only PUT trades per user request
+            self._last_traded_key = getattr(self, "_pending_key", None)
             await self._execute_put_breakout(ltp)
 
     async def _execute_put_breakout(self, index_price: float):
@@ -425,14 +432,14 @@ class TradingWorker:
         if option_5m_low == 0.0 and self._latest_put_ltp > 0:
             option_5m_low = self._latest_put_ltp
 
-        calculated_sl = max(0.05, option_5m_low - 3.0)
+        calculated_sl = 0.05   # real SL is set by Position (interim 15pt, then candle low)
 
         # Generate Signal to execute buy
         signal = Signal(
             symbol=f"NIFTY_{atm_strike}_PE",
             direction="BUY",
             option_type="PE",
-            entry_reference=0.0, # Market price
+            entry_reference=float(self._latest_put_ltp or 0.0),
             stop_loss_reference=calculated_sl,
             signal_reason="NIFTY_5M_BREAKOUT",
             security_id=security_id
@@ -460,7 +467,40 @@ class TradingWorker:
             await self.execution_engine.process_signal(signal, quantity=quantity)
         except Exception as e:
             logger.error(f"Error processing breakout signal: {e}")
-
+    async def _try_finalize_sl(self, pos):
+        import time as _t
+        import pandas as pd
+        now = datetime.now(IST)
+        end = pos.entry_bucket + timedelta(minutes=5)
+        if now < end + timedelta(seconds=5):
+            return
+        if _t.time() - getattr(pos, "_last_try", 0) < 2:
+            return
+        pos._last_try = _t.time()
+        low = 0.0
+        try:
+            from app.dhan.client import get_dhan_client
+            dhan = get_dhan_client()
+            r = await dhan.intraday_minute_data(
+                security_id=str(pos.security_id),
+                exchange_segment="NSE_FNO",
+                instrument_type="OPTIDX",
+                from_date=pos.entry_bucket.strftime("%Y-%m-%d %H:%M:%S"),
+                to_date=now.strftime("%Y-%m-%d %H:%M:%S"),
+                interval=5,
+            )
+            d = (r or {}).get("data") or {}
+            if r.get("status") == "success" and d.get("low"):
+                ts = pd.to_datetime(d["timestamp"], unit="s", utc=True).tz_convert(IST)
+                for t, lo in zip(ts, d["low"]):
+                    if t == pd.Timestamp(pos.entry_bucket):
+                        low = float(lo)
+        except Exception as e:
+            logger.error(f"candle-low error: {e}")
+        if low > 0 or now > end + timedelta(seconds=90):
+            pos.finalize_sl(low)
+            logger.info(f"✅ SL finalized {pos.stop_loss:.2f} | 1R {pos.risk_diff:.2f} | T1 {pos.target_1:.2f}")
+            
     async def _monitor_positions(self, ltp: float, tick_type: str, security_id: str):
         now = datetime.now(IST)
         is_force_close_time = now.time() >= __import__('datetime').time(15, 10)
@@ -473,9 +513,13 @@ class TradingWorker:
                 except Exception as e:
                     logger.error(f"Failed to force exit position {pos.position_id}: {e}")
                 continue
+                
+            if pos.security_id == security_id and not pos.sl_finalized:
+                await self._try_finalize_sl(pos)
 
             if pos.security_id == security_id:
                 exit_reason = pos.update_price(ltp)
+                
                 if exit_reason:
                     if exit_reason == "PARTIAL_EXIT":
                         logger.info(f"Selling partial quantity (65) for position {pos.position_id}")

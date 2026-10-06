@@ -5,10 +5,11 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 try:
-    from dhanhq import dhanhq
+    from dhanhq import dhanhq, DhanContext
 except ImportError:
     dhanhq = None
-
+    DhanContext = None
+    
 from app.adapter.base import BrokerAdapter
 from app.core.config import settings
 
@@ -33,7 +34,10 @@ class DhanAdapter(BrokerAdapter):
             return False
         try:
             loop = asyncio.get_running_loop()
-            self.dhan = await loop.run_in_executor(None, lambda: dhanhq(self.client_id, self.access_token))
+            def _init_dhan():
+                context = DhanContext(self.client_id, self.access_token)
+                return dhanhq(context)
+            self.dhan = await loop.run_in_executor(None, _init_dhan)
             self._connected = True
             logger.info("DhanAdapter connected successfully.")
             return True

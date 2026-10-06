@@ -72,21 +72,14 @@ class IndexBreakoutStrategy(BaseStrategy):
             'C2': B2['close'] < B2['open'],
             'C3': B2['high'] > B1['high'],
             'C4': B1['low'] < B2['low'],
-            'C6': 8 < (B2['high'] - B1['high']) < 80,
-            'C7': 8 < (B2['low'] - B1['low']) < 80,
-            'C8': 5 < (B1['close'] - B1['open']) < 100,
-            'C9': 4 < (B2['open'] - B2['close']) < 100,
-            'C10': (B1['high'] - B1['low']) < 150,
-            'C11': (B2['high'] - B2['low']) < 150,
+            'C5': (B2['high'] - B1['low']) < 22,
             'C12': C12,
             'b2_rsi': b2_rsi,
             'b1_low': B1['low']
         }
-
         pattern_formed = all([
-            c_vals['C1'], c_vals['C2'], c_vals['C3'], c_vals['C4'],
-            c_vals['C6'], c_vals['C7'], c_vals['C8'], c_vals['C9'],
-            c_vals['C10'], c_vals['C11'], c_vals['C12']
+            c_vals['C1'], c_vals['C2'], c_vals['C3'],
+            c_vals['C4'], c_vals['C5'], c_vals['C12']
         ])
 
         return pattern_formed, B1['low'], c_vals

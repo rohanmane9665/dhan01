@@ -16,7 +16,7 @@ export default function Dashboard() {
   const { data: stats } = useFetch(getDailyStats, 5000);
   const { data: funds } = useFetch(getFundLimits, 15000);
 
-  const sensex     = sse?.sensex     || 0;
+  const sensex     = sse?.nifty      || 0;
   const ceLtp      = sse?.ce_ltp     || 0;
   const peLtp      = sse?.pe_ltp     || 0;
   const openPos    = sse?.open_positions ?? 0;
@@ -36,7 +36,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Trading Dashboard</h2>
-          <p className="text-sm text-gray-500 mt-0.5">SENSEX Options · 15-Min RSI Breakout Strategy</p>
+          <p className="text-sm text-gray-500 mt-0.5">NIFTY Options · 5-Min Breakout Strategy</p>
         </div>
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' : 'bg-gray-600'}`} />
@@ -94,7 +94,7 @@ export default function Dashboard() {
 
         {/* Market Prices */}
         {[
-          { label: 'SENSEX Index', value: sensex, color: 'blue' },
+          { label: 'NIFTY 50', value: sensex, color: 'blue' },
           { label: 'CE LTP', value: ceLtp, color: 'green' },
           { label: 'PE LTP', value: peLtp, color: 'red' },
         ].map(({ label, value, color }) => (
@@ -116,7 +116,7 @@ export default function Dashboard() {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           {[
-            ['Instrument', 'SENSEX Options'],
+            ['Instrument', 'NIFTY Options'],
             ['Candle TF', '15 Minutes'],
             ['RSI Period', '14'],
             ['RSI Threshold', '59.99'],

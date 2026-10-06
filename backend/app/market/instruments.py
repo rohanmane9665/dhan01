@@ -74,17 +74,18 @@ class InstrumentManager:
                     exch = row_dict.get("SEM_EXM_EXCH_ID")
                     inst_type = row_dict.get("SEM_INSTRUMENT_NAME")
                     
-                    if inst_type == "OPTIDX" and exch == "BSE":
-                        parts = symbol.split()
-                        if len(parts) >= 3:
-                            try:
-                                base = parts[0]
-                                strike = float(parts[-2])
-                                opt_type = parts[-1]
-                                self._option_lookup[(base, strike, opt_type)] = sec_id
-                                count += 1
-                            except ValueError:
-                                pass
+                    if inst_type == "OPTIDX" and exch == "NSE":
+                        try:
+                            base = (symbol or "").split("-")[0]
+                            if base != "NIFTY":
+                                continue
+                            strike = float(row_dict.get("SEM_STRIKE_PRICE"))
+                            opt_type = (row_dict.get("SEM_OPTION_TYPE") or "").strip()
+                            exp = (row_dict.get("SEM_EXPIRY_DATE") or "")[:10]
+                            self._option_lookup[(base, strike, opt_type, exp)] = sec_id
+                            count += 1
+                        except (ValueError, TypeError):
+                            pass
                                 
             logger.info(f"Successfully loaded {count} options into lookup.")
         except Exception as e:
@@ -117,4 +118,4 @@ class InstrumentManager:
             logger.warning(f"Option chain API lookup failed: {e}. Falling back to CSV.")
 
         # 2. Fallback: CSV Master
-        return self._option_lookup.get(key)
+        return self._option_lookup.get((base_symbol, strike, option_type, expiry_date))

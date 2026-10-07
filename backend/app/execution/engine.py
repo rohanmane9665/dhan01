@@ -229,6 +229,7 @@ class ExecutionEngine:
         
         async with AsyncSessionLocal() as session:
             order_repo = OrderRepository(session)
+            pos_repo = PositionRepository(session)
             trade_repo = TradeRepository(session)
             event_repo = EventRepository(session)
 
@@ -262,6 +263,7 @@ class ExecutionEngine:
                 })
 
                 self.position_manager.partial_close(position_id, quantity, fill_price)
+                await pos_repo.update_position(position_id, {"quantity": pos.quantity})
                 await event_repo.log_system_event("POSITION_PARTIAL_CLOSED", "INFO", f"Sold {quantity} of {position_id} at {fill_price}")
 
                 return {
@@ -336,6 +338,8 @@ class ExecutionEngine:
                 })
 
                 closed = self.position_manager.close_position(position_id, fill_price)
+                if closed:
+                    self.risk_manager.record_position_closed(closed.realized_pnl)
                 
                 await pos_repo.update_position(position_id, {
                     "status": "CLOSED", 

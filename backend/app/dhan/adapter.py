@@ -62,22 +62,43 @@ class DhanAdapter(BrokerAdapter):
         """
         Places order with Dhan API. Never retries blindly on uncertainty.
         """
-        return await self._run_async(
-            self.dhan.place_order,
-            security_id=str(order_data.get("security_id")),
-            exchange_segment=order_data.get("exchange_segment", "BSE_FNO"),
-            transaction_type=order_data.get("transaction_type", "BUY"),
-            quantity=int(order_data.get("quantity", 1)),
-            order_type=order_data.get("order_type", "MARKET"),
-            product_type=order_data.get("product_type", "MARGIN"),
-            price=float(order_data.get("price", 0.0)),
-            trigger_price=float(order_data.get("trigger_price", 0.0)),
-            validity='DAY'
-        )
-
+        try:
+            resp = await self._run_async(
+                self.dhan.place_order,
+                security_id=str(order_data.get("security_id")),
+                exchange_segment=order_data.get("exchange_segment", "NSE_FNO"),
+                transaction_type=order_data.get("transaction_type", "BUY"),
+                quantity=int(order_data.get("quantity", 1)),
+                order_type=order_data.get("order_type", "LIMIT"),
+                product_type=order_data.get("product_type", "MARGIN"),
+                price=float(order_data.get("price", 0.0)),
+                trigger_price=float(order_data.get("trigger_price", 0.0)),
+                validity="DAY",
+            )
+        except Exception as e:
+            logger.error(f"Dhan place_order exception: {e}", exc_info=True)
+            return {"status": "failure", "remarks": f"exception: {e}"}
+            
+        logger.info(f"Dhan place_order response: {resp}")
+        return resp
+        
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         return await self._run_async(self.dhan.cancel_order, order_id=str(order_id))
-
+        
+    async def get_order_by_id(self, order_id: str) -> Dict[str, Any]:
+        try:
+            res = await self._run_async(self.dhan.get_order_by_id, str(order_id))
+        except Exception as e:
+            logger.warning(f"Dhan get_order_by_id exception: {e}")
+            return {}
+            
+        if isinstance(res, dict) and res.get("status") == "success":
+            d = res.get("data", {})
+            if isinstance(d, list):
+                return d[0] if d else {}
+            return d or {}
+        return {}
+        
     async def get_positions(self) -> List[Dict[str, Any]]:
         res = await self._run_async(self.dhan.get_positions)
         if isinstance(res, dict) and res.get("status") == "success":
@@ -123,9 +144,10 @@ class PaperBrokerAdapter(BrokerAdapter):
         side = order_data.get("transaction_type", "BUY")
         quantity = int(order_data.get("quantity", 1))
         security_id = str(order_data.get("security_id", "PAPER_SEC"))
-        req_price = float(order_data.get("price", 100.0))
+        
+        req_price = float(order_data.get("reference_price") or 0.0)
         if req_price <= 0:
-            req_price = float(order_data.get("reference_price", 100.0))
+            req_price = float(order_data.get("price") or 100.0)
 
         # Apply simulated slippage
         slippage = req_price * self.slippage_pct if side == "BUY" else -req_price * self.slippage_pct
@@ -135,9 +157,9 @@ class PaperBrokerAdapter(BrokerAdapter):
             "orderId": order_id,
             "securityId": security_id,
             "transactionType": side,
-            "quantity": quantity,
+            "filledQty": quantity,
             "tradedPrice": fill_price,
-            "orderStatus": "FILLED",
+            "averageTradedPrice": fill_price,
             "createTime": datetime.now().isoformat()
         }
         self.orders.append(order_record)
@@ -169,7 +191,13 @@ class PaperBrokerAdapter(BrokerAdapter):
                 o["orderStatus"] = "CANCELLED"
                 return {"status": "success", "data": {"orderId": order_id, "orderStatus": "CANCELLED"}}
         return {"status": "failure", "remarks": "Order not found"}
-
+        
+    async def get_order_by_id(self, order_id: str) -> Dict[str, Any]:
+        for o in self.orders:
+            if o["orderId"] == order_id:
+                return {**o, "orderStatus": "TRADED" if o["orderStatus"] == "FILLED" else o["orderStatus"]}
+        return {}
+        
     async def get_positions(self) -> List[Dict[str, Any]]:
         return list(self.positions.values())
 

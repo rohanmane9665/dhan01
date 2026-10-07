@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import pytz
+import time as _time
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -61,6 +62,7 @@ class Position:
         
         # Max tracked level for trailing
         self.current_trail_level = 0
+        self._t1_block_until = 0.0
 
     def finalize_sl(self, candle_low):
         if candle_low and candle_low > 0:
@@ -91,27 +93,24 @@ class Position:
             return f"STOP_LOSS_HIT (LTP {current_price} <= SL {self.stop_loss})"
 
         # Check Target 1 (Partial Exit)
-        if not self.target_1_hit and current_price >= self.target_1:
+        if not self.target_1_hit and current_price >= self.target_1 and _time.time() >= self._t1_block_until:
             self.target_1_hit = True
             self.stop_loss = self.entry_price
             logger.info(f"🎯 Target 1 Hit at {current_price}! Trailing SL moved to breakeven ({self.stop_loss}).")
             return "PARTIAL_EXIT"
 
         # Check Trailing Tiers if Target 1 was hit
-        if self.target_1_hit:
-            # Check multipliers 3 to 8
-            for n in range(3, 9):
-                price_threshold = self.entry_price + (n * self.risk_diff)
-                if current_price >= price_threshold and self.current_trail_level < n:
+        if self.target_1_hit and self.risk_diff > 0:
+            n = int((current_price - self.entry_price) / self.risk_diff)   # no 8R cap
+            if n >= 3:
+                new_sl = self.entry_price + (n - 2) * self.risk_diff
+                if new_sl > self.stop_loss:
+                    old_sl = self.stop_loss
+                    self.stop_loss = new_sl
                     self.current_trail_level = n
-                    new_sl = self.entry_price + ((n - 2) * self.risk_diff)
-                    if new_sl > self.stop_loss:
-                        old_sl = self.stop_loss
-                        self.stop_loss = new_sl
-                        self.trailed_sl = True
-                        logger.info(f"📈 Trailing SL Tier {n} reached at {current_price}! SL updated: {old_sl} -> {self.stop_loss}")
+                    self.trailed_sl = True
+                    logger.info(f"📈 {n}R reached at {current_price}! SL updated: {old_sl} -> {self.stop_loss}")
         return None
-
     @property
     def unrealized_pnl(self) -> float:
         return (self.current_price - self.entry_price) * self.quantity

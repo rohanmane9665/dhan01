@@ -157,9 +157,11 @@ class PaperBrokerAdapter(BrokerAdapter):
             "orderId": order_id,
             "securityId": security_id,
             "transactionType": side,
+            "quantity": quantity,
             "filledQty": quantity,
             "tradedPrice": fill_price,
             "averageTradedPrice": fill_price,
+            "orderStatus": "FILLED",
             "createTime": datetime.now().isoformat()
         }
         self.orders.append(order_record)

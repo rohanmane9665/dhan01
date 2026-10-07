@@ -69,7 +69,7 @@ class DhanAdapter(BrokerAdapter):
             transaction_type=order_data.get("transaction_type", "BUY"),
             quantity=int(order_data.get("quantity", 1)),
             order_type=order_data.get("order_type", "MARKET"),
-            product_type=order_data.get("product_type", "INTRADAY"),
+            product_type=order_data.get("product_type", "MARGIN"),
             price=float(order_data.get("price", 0.0)),
             trigger_price=float(order_data.get("trigger_price", 0.0)),
             validity='DAY'

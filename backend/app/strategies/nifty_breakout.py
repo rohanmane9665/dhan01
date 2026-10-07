@@ -4,6 +4,8 @@ from typing import Optional, Dict, Any, Tuple
 from app.strategies.base import BaseStrategy
 from app.strategies.models import Signal
 import numpy as np
+from datetime import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,12 @@ class NiftyBreakoutStrategy(BaseStrategy):
         else:
             live_rsi = None
 
+        _today = datetime.now(pytz.timezone("Asia/Kolkata")).date()
+        same_day = (pd.Timestamp(B1['timestamp']).date() == _today and 
+                    pd.Timestamp(B2['timestamp']).date() == _today)
         c_vals = {
+            'C_today': same_day,
+            'C1': B1['close'] > B1['open'],
             'C1': B1['close'] > B1['open'],
             'C2': B2['close'] < B2['open'],
             'C3': B2['high'] > B1['high'],
@@ -88,7 +95,7 @@ class NiftyBreakoutStrategy(BaseStrategy):
         }
 
         pattern_formed = all([
-            c_vals['C1'], c_vals['C2'], c_vals['C3'], 
+            c_vals['C_today'], c_vals['C1'], c_vals['C2'], c_vals['C3'], 
             c_vals['C4'], c_vals['C5'], c_vals['C12']
         ])
 

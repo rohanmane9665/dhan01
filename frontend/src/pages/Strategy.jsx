@@ -7,7 +7,7 @@ const STRATEGY_PARAMS = [
     ['Exchange', 'BSE FNO'],
     ['Underlying', 'NIFTY 50 Index'],
     ['Option Type', 'CE and PE'],
-    ['Product', 'INTRADAY'],
+    ['Product', 'MARGIN'],
   ]},
   { group: 'Signal Logic', params: [
     ['Candle Timeframe', '15 Minutes'],

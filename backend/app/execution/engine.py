@@ -306,7 +306,7 @@ class ExecutionEngine:
                 return {"order_id": order_id, "status": "FAILED", "reason": f"only {filled}/{quantity} sold"}
             return {"order_id": order_id, "status": "PARTIAL_CLOSED", "traded_price": fill_price}
             
-   async def close_position(self, position_id: str, exit_price: float) -> Dict[str, Any]:
+    async def close_position(self, position_id: str, exit_price: float) -> Dict[str, Any]:
         pos = self.position_manager.active_positions.get(position_id)
         if not pos:
             return {"status": "ERROR", "reason": f"Position {position_id} not found"}

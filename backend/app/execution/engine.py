@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+from app.core.redis import redis_client
 
 from app.adapter.base import BrokerAdapter
 from app.execution.position_manager import PositionManager, Position
@@ -55,6 +56,10 @@ class ExecutionEngine:
         return True, float(fallback or 0.0), oid  # order IS live, never abandon it
         
     async def execute_signal(self, signal: Signal) -> Dict[str, Any]:
+        got = await redis_client.set(f"entry_lock:{signal.symbol}", "1", nx=True, ex=60)
+        if not got:
+            logger.warning(f"Duplicate entry for {signal.symbol} blocked")
+            return {"status": "REJECTED", "reason": "duplicate_signal"}
         order_id = f"ORD_{uuid.uuid4().hex[:8].upper()}"
         active_count = len(self.position_manager.get_active_positions())
 

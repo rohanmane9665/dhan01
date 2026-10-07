@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import json
-from datetime import datetime, timedelta
+import time as _time
+from datetime import datetime, timedelta, time as dtime
 import pytz
 import math
 
@@ -40,6 +41,10 @@ class TradingWorker:
             position_manager=self.position_manager,
         )
         self.validator = DataValidator(stale_seconds=settings.MARKET_DATA_STALE_SECONDS if settings else 3)
+        self.validators = {}          # one validator per security_id
+        self._last_put_tick = 0.0
+        self._entering = False
+        self._entry_task = None
 
         # Single candle engine for NIFTY 50 (5 minutes)
         self.index_engine = CandleEngine(interval_minutes=5)
@@ -82,20 +87,26 @@ class TradingWorker:
         async with AsyncSessionLocal() as session:
             pos_repo = PositionRepository(session)
             db_positions = await pos_repo.get_open_positions()
+            
             for db_p in db_positions:
-                pos = Position(
-                    position_id=db_p.id,
-                    symbol=db_p.symbol,
-                    security_id=db_p.security_id,
-                    option_type=db_p.option_type,
-                    quantity=db_p.quantity,
-                    entry_price=db_p.entry_price,
-                    stop_loss=db_p.stop_loss,
-                    strategy_id=db_p.strategy_id
-                )
-                self.position_manager.add_position(pos)
-                if pos.option_type == "PE":
-                    self._active_put_security_id = pos.security_id
+                try:
+                    parts = str(db_p.symbol).split("_")          # NIFTY_24500_PE
+                    strike, opt = float(parts[1]), parts[2]
+                    sec_id = self.instrument_manager.get_security_id(
+                        base_symbol="NIFTY", strike=strike, option_type=opt,
+                        expiry_date=self.calendar.get_expiry_str_yyyy_mm_dd())
+                    if not sec_id:
+                        raise ValueError(f"security_id not found for {db_p.symbol}")
+                    pos = Position(
+                        position_id=db_p.id, symbol=db_p.symbol, security_id=sec_id,
+                        option_type=opt, quantity=db_p.quantity,
+                        entry_price=db_p.entry_price, stop_loss=0.0)
+                    pos.finalize_sl(0)       # safe 15-pt SL, marks SL as final
+                    self.position_manager.add_position(pos)
+                    if opt == "PE":
+                        self._active_put_security_id = sec_id
+                except Exception as e:
+                    logger.error(f"Could not restore position {db_p.id}: {e}")
         
         await self.reconciliation.reconcile()
         await self.seed_candles()
@@ -104,6 +115,7 @@ class TradingWorker:
 
         # Start background logger
         asyncio.create_task(self._log_status_periodic())
+        asyncio.create_task(self._position_watchdog())
 
     async def _log_status_periodic(self):
         """Periodically logs status and active strategy states."""
@@ -302,23 +314,31 @@ class TradingWorker:
             tick_type = tick.get("type", "INDEX")
             security_id = str(tick.get("security_id", ""))
 
-            is_valid, reason = self.validator.validate(ltp, ts)
+            v = self.validators.get(security_id)
+            if v is None:
+                v = DataValidator(
+                    stale_seconds=settings.MARKET_DATA_STALE_SECONDS if settings else 3,
+                    max_spike_pct=0.10 if tick_type == "INDEX" else 0.5)
+                self.validators[security_id] = v
+            is_valid, reason = v.validate(ltp, ts)
             if not is_valid:
                 return
 
             if tick_type == "INDEX" and security_id == "13":
                 self._latest_index = ltp
-                completed = self.index_engine.process_tick(ltp, ts)
-                if completed:
-                    await self._on_candle_close(completed)
-                
-                # Check Breakout Monitor
+                ts_ist = ts.astimezone(IST) if ts.tzinfo else IST.localize(ts)
+                if dtime(9, 15) <= ts_ist.time() < dtime(15, 30):
+                    completed = self.index_engine.process_tick(ltp, ts)
+                    if completed:
+                        await self._on_candle_close(completed)
+
                 if self._waiting_for_breakout:
                     await self._check_breakout(ltp, ts)
 
             elif tick_type == "PE" and security_id == self._active_put_security_id:
                 self._latest_put_ltp = ltp
-
+                self._last_put_tick = _time.time()
+                
             await self._monitor_positions(ltp, tick_type, security_id)
             await self._publish_snapshot()
         except Exception as e:
@@ -334,7 +354,7 @@ class TradingWorker:
         
         # If pattern formed, start 15 min countdown
         if pattern_formed and not self.position_manager.get_active_positions() \
-                and not self._waiting_for_breakout:
+                and not self._waiting_for_breakout and not self._entering:
             key = str(df.iloc[-2]['timestamp'])
             if key == getattr(self, "_last_traded_key", None):
                 return
@@ -371,81 +391,77 @@ class TradingWorker:
 
             # Only PUT trades per user request
             self._last_traded_key = getattr(self, "_pending_key", None)
-            await self._execute_put_breakout(ltp)
+            self._entering = True
+            self._entry_task = asyncio.create_task(self._run_entry(ltp))
+
+    async def _run_entry(self, index_price: float):
+        try:
+            await self._execute_put_breakout(index_price)
+        except Exception as e:
+            logger.error(f"Entry failed: {e}", exc_info=True)
+        finally:
+            self._entering = False
+
+    async def _rest_option_ltp(self, security_id) -> float:
+        try:
+            from app.dhan.client import get_dhan_client
+            r = await get_dhan_client().ticker_data({"NSE_FNO": [int(security_id)]})
+            d = (r or {}).get("data", {})
+            d = d.get("data", d)
+            return float(d["NSE_FNO"][str(security_id)]["last_price"])
+        except Exception as e:
+            logger.warning(f"REST LTP failed: {e}")
+            return 0.0
 
     async def _execute_put_breakout(self, index_price: float):
+        t0 = datetime.now(IST)
+        entry_bucket = t0.replace(minute=t0.minute // 5 * 5, second=0, microsecond=0)
         atm_strike = _nifty_atm_strike(index_price)
         logger.info(f"🔍 Looking for PUT option for ATM Strike {atm_strike}")
         
-        # Get Option Chain Security ID
         expiry_date = self.calendar.get_expiry_str_yyyy_mm_dd()
         security_id = self.instrument_manager.get_security_id(
-            base_symbol="NIFTY",
-            strike=float(atm_strike),
-            option_type="PE",
-            expiry_date=expiry_date
-        )
+            base_symbol="NIFTY", strike=float(atm_strike),
+            option_type="PE", expiry_date=expiry_date)
+            
         if not security_id:
             logger.error(f"Could not resolve security ID for NIFTY {atm_strike} PE.")
             return
             
         self._active_put_security_id = security_id
+        self._latest_put_ltp = 0.0      # clear the previous trade's price
+        self._last_put_tick = 0.0
         
-        if hasattr(self, "market_feed") and self.market_feed:
+        mf = getattr(self, "market_feed", None)
+        if mf:
             try:
                 from dhanhq import MarketFeed as DhanMF
-                instruments = getattr(self.market_feed, "_instruments", []).copy()
-                type_map = getattr(self.market_feed, "_instrument_type_map", {}).copy()
-                # NIFTY options use NSE_FNO
-                instruments.append((DhanMF.NSE_FNO, str(security_id), DhanMF.Ticker))
-                type_map[str(security_id)] = "PE"
-                self.market_feed.update_instruments(instruments, type_map)
-                logger.info(f"📡 Dynamically subscribed to PUT {security_id} on NSE_FNO")
+                mf.close_extra_feeds()
+                mf.add_instruments([(DhanMF.NSE_FNO, str(security_id), DhanMF.Ticker)],
+                                   {str(security_id): "PE"})
             except Exception as e:
-                logger.error(f"Failed to dynamically subscribe to {security_id}: {e}")
-        
-        # Fetch Option 5-min candle low for Stop Loss calculation
-        option_5m_low = 0.0
-        try:
-            from app.dhan.client import get_dhan_client
-            dhan = get_dhan_client()
-            if dhan and dhan._client:
-                today_str = datetime.now(IST).strftime("%Y-%m-%d")
-                opt_data = await dhan.intraday_minute_data(
-                    security_id=str(security_id),
-                    exchange_segment="NSE_FNO",
-                    instrument_type="OPTIDX",
-                    from_date=today_str,
-                    to_date=today_str,
-                    interval=5
-                )
-                if isinstance(opt_data, dict) and opt_data.get('status') == 'success':
-                    d = opt_data.get('data', {})
-                    lows = d.get('low', [])
-                    if lows:
-                        option_5m_low = float(lows[-1])
-                        logger.info(f"📉 Option 5M Candle Low: {option_5m_low}")
-        except Exception as e:
-            logger.error(f"Failed to fetch option candle low: {e}")
-
-        # Fallback SL if API fails
-        if option_5m_low == 0.0 and self._latest_put_ltp > 0:
-            option_5m_low = self._latest_put_ltp
-
+                logger.error(f"Failed to subscribe to {security_id}: {e}")
+                
+        # wait up to 3s for the first option tick, else use REST
+        for _ in range(30):
+            if self._latest_put_ltp > 0:
+                break
+            await asyncio.sleep(0.1)
+            
+        ref_price = self._latest_put_ltp or await self._rest_option_ltp(security_id)
         calculated_sl = 0.05   # real SL is set by Position (interim 15pt, then candle low)
-
-        # Generate Signal to execute buy
+        
         signal = Signal(
             symbol=f"NIFTY_{atm_strike}_PE",
             direction="BUY",
             option_type="PE",
-            entry_reference=float(self._latest_put_ltp or 0.0),
+            entry_reference=float(ref_price or 0.0),
             stop_loss_reference=calculated_sl,
             signal_reason="NIFTY_5M_BREAKOUT",
             security_id=security_id
         )
         
-        logger.info(f"🎯 Firing PUT Signal for {signal.symbol} (Sec ID: {security_id}), Initial SL: {calculated_sl}")
+        logger.info(f"🎯 Firing PUT Signal for {signal.symbol} (Sec ID: {security_id}), ref price {ref_price}")
         
         await redis_client.set(
             "last_signal",
@@ -458,15 +474,15 @@ class TradingWorker:
             }),
             ex=3600,
         )
-
-        try:
-            # Wait a sec for frontend to catch up before order
-            await asyncio.sleep(1)
-            # Fixed quantity across all days
-            quantity = 130
-            await self.execution_engine.process_signal(signal, quantity=quantity)
-        except Exception as e:
-            logger.error(f"Error processing breakout signal: {e}")
+        
+        result = await self.execution_engine.process_signal(signal, quantity=130)
+        if isinstance(result, dict) and result.get("status") == "FILLED":
+            pos = self.position_manager.active_positions.get(result.get("position_id"))
+            if pos:
+                pos.entry_bucket = entry_bucket     # bucket at order time, not after the fill wait
+        elif mf and not self.position_manager.get_active_positions():
+            mf.close_extra_feeds()
+            
     async def _try_finalize_sl(self, pos):
         import time as _t
         import pandas as pd
@@ -524,16 +540,63 @@ class TradingWorker:
                     if exit_reason == "PARTIAL_EXIT":
                         logger.info(f"Selling partial quantity (65) for position {pos.position_id}")
                         try:
-                            # Hardcoded partial exit quantity of 65 as requested
-                            await self.execution_engine.partial_close_position(pos.position_id, 65, ltp)
+                            res = await self.execution_engine.partial_close_position(pos.position_id, 65, ltp)
+                            if not isinstance(res, dict) or res.get("status") != "PARTIAL_CLOSED":
+                                raise RuntimeError(f"partial exit not filled: {res}")
                         except Exception as e:
-                            logger.error(f"Failed to partial exit position {pos.position_id}: {e}")
+                            logger.error(f"Failed to partial exit position {pos.position_id}: {e} - will retry")
+                            pos.target_1_hit = False                  # undo the early flag
+                            pos.stop_loss = pos.initial_stop_loss     # undo the early breakeven move
+                            pos._t1_block_until = _time.time() + 2    # retry in 2s
                     else:
                         logger.info(f"Closing position {pos.position_id}: {exit_reason}")
                         try:
                             await self.execution_engine.close_position(pos.position_id, ltp)
                         except Exception as e:
                             logger.error(f"Failed to full exit position {pos.position_id}: {e}")
+    async def _position_watchdog(self):
+        """REST price fallback, reconnect on a silent feed, 45s no-price exit, option-feed cleanup."""
+        last_ok = _time.time()
+        last_resub = 0.0
+        while self._running:
+            await asyncio.sleep(1)
+            try:
+                positions = self.position_manager.get_active_positions()
+                mf = getattr(self, "market_feed", None)
+                if not positions:
+                    last_ok = _time.time()
+                    if mf and not self._entering and mf.has_extra_feeds():
+                        mf.close_extra_feeds()      # free the option websocket after the trade
+                    continue
+                    
+                pos = positions[0]
+                sid = str(pos.security_id)
+                age = _time.time() - self._last_put_tick if self._last_put_tick else 1e9
+                if age < 5:
+                    last_ok = _time.time()
+                    continue
+                    
+                # websocket silent for 5s+ -> use REST price
+                ltp = await self._rest_option_ltp(sid)
+                if ltp > 0:
+                    last_ok = _time.time()
+                    await self._monitor_positions(ltp, "PE", sid)
+
+                # silent for 15s+ -> reconnect the option feed
+                if age > 15 and mf and _time.time() - last_resub > 10:
+                    last_resub = _time.time()
+                    from dhanhq import MarketFeed as DhanMF
+                    mf.close_extra_feeds()
+                    mf.add_instruments([(DhanMF.NSE_FNO, sid, DhanMF.Ticker)], {sid: "PE"})
+                    logger.warning(f"🔄 Reconnecting option feed {sid}")
+                    
+                # no price from anywhere for 45s -> close at market
+                if _time.time() - last_ok > 45 and self.position_manager.get_active_positions():
+                    logger.error("🚨 No option price for 45s - closing at market")
+                    await self.execution_engine.close_position(pos.position_id, pos.current_price)
+                    last_ok = _time.time()
+            except Exception as e:
+                logger.error(f"Watchdog error: {e}")
 
     async def _publish_snapshot(self):
         try:

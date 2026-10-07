@@ -119,17 +119,12 @@ async def main():
         feed.set_instrument_type(sec_id, tick_type)
     await feed.start(instruments if instruments else None)
     worker.market_feed = feed
-
-    # Wait for NIFTY price to populate from live market feed before seeding
-    if worker._latest_index <= 0:
-        logger.info("⏳ Waiting for NIFTY price from market feed before seeding candles...")
-        for _ in range(15):
-            if worker._latest_index > 0:
-                break
-            await asyncio.sleep(1)
-
-    # Seed candles from historical intraday data
-    await worker.seed_candles()
+  
+  # After a restart with an open position, re-subscribe its option
+    if worker._active_put_security_id:
+        from dhanhq import MarketFeed as DhanMF
+        sid = str(worker._active_put_security_id)
+        feed.add_instruments([(DhanMF.NSE_FNO, sid, DhanMF.Ticker)], {sid: "PE"})
 
     # Start scheduler
     start_scheduler(worker)

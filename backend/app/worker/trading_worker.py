@@ -330,7 +330,7 @@ class TradingWorker:
                 if dtime(9, 15) <= ts_ist.time() < dtime(15, 30):
                     completed = self.index_engine.process_tick(ltp, ts)
                     if completed:
-                        await self._on_candle_close(completed)
+                        self._candle_task = asyncio.create_task(self._safe_candle_close(completed))
 
                 if self._waiting_for_breakout:
                     await self._check_breakout(ltp, ts)
@@ -343,12 +343,64 @@ class TradingWorker:
             await self._publish_snapshot()
         except Exception as e:
             logger.error(f"Error processing tick {tick}: {e}", exc_info=True)
+    async def _safe_candle_close(self, candle: dict):
+        try:
+            await self._on_candle_close(candle)
+        except Exception as e:
+            logger.error(f"Error in candle close handler: {e}", exc_info=True)
+
+    async def _refresh_official_candles(self, completed: dict) -> bool:
+        """Replace today's tick-built candles with Dhan's official 5-min candles.
+        Returns True only if the just-closed candle is present in the official data."""
+        import pandas as pd
+        from app.dhan.client import get_dhan_client
+        dhan = get_dhan_client()
+        target = pd.Timestamp(completed["timestamp"])
+        for _ in range(5):                       # official candle can lag a few seconds
+            try:
+                now = datetime.now(IST)
+                r = await dhan.intraday_minute_data(
+                    security_id="13", exchange_segment="IDX_I", instrument_type="INDEX",
+                    from_date=now.strftime("%Y-%m-%d") + " 09:15:00",
+                    to_date=now.strftime("%Y-%m-%d %H:%M:%S"),
+                    interval=5)
+                d = (r or {}).get("data") or {}
+                if (r or {}).get("status") == "success" and d.get("open"):
+                    ts = pd.to_datetime(d["timestamp"], unit="s", utc=True).tz_convert(IST)
+                    cur = self.index_engine.current_candle
+                    cur_ts = pd.Timestamp(cur["timestamp"]) if cur else None
+                    official = []
+                    for i, t in enumerate(ts):
+                        if cur_ts is not None and t >= cur_ts:
+                            continue             # skip the candle still forming
+                        if not (dtime(9, 15) <= t.time() <= dtime(15, 29)):
+                            continue
+                        official.append({
+                            "timestamp": t.to_pydatetime(),
+                            "open": float(d["open"][i]), "high": float(d["high"][i]),
+                            "low": float(d["low"][i]), "close": float(d["close"][i]),
+                            "volume": 0,
+                        })
+                    if official and pd.Timestamp(official[-1]["timestamp"]) == target:
+                        today = now.date()
+                        older = [c for c in self.index_engine.candles
+                                 if pd.Timestamp(c["timestamp"]).date() != today]
+                        self.index_engine.candles = older + official
+                        logger.info(f"✅ Official candles loaded: {len(official)} today, last = {target.strftime('%H:%M')}")
+                        return True
+            except Exception as e:
+                logger.warning(f"Official candle fetch error: {e}")
+            await asyncio.sleep(2)
+        logger.warning(f"⚠️ Official {target.strftime('%H:%M')} candle not available - using tick-built candles")
+        return False
+        
 
     async def _on_candle_close(self, candle: dict):
         logger.info(f"📊 NIFTY 5m Candle closed: O={candle['open']} H={candle['high']} L={candle['low']} C={candle['close']}")
         if not self.calendar.is_market_open():
             return
             
+        await self._refresh_official_candles(candle)    # use Dhan's official candles
         df = self.index_engine.get_dataframe()
         pattern_formed, b1_low, _ = self.strategy.evaluate(df)
         

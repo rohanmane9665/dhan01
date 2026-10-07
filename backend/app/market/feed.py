@@ -50,6 +50,7 @@ class MarketFeed:
         # Track subscribed instruments for dynamic updates
         # Format: [(exchange_segment, security_id, subscription_type), ...]
         self._instruments: List[Tuple] = []
+        self._extra_feeds = []   # separate websockets for options
 
         # Instrument type mapping: security_id -> tick_type ("INDEX", "CE", "PE")
         self._instrument_type_map: Dict[str, str] = {}
@@ -85,6 +86,7 @@ class MarketFeed:
     async def stop(self):
         """Stop the market feed and clean up."""
         self._running = False
+        self.close_extra_feeds()
         if self._sdk_feed:
             try:
                 self._sdk_feed.close_connection()
@@ -119,7 +121,34 @@ class MarketFeed:
         logger.info(f"🔄 Instrument subscription updated: {len(instruments)} instruments")
         self._start_dhan_feed()
 
-    # ------------------------------------------------------------------ #
+    def add_instruments(self, instruments: List[Tuple], type_map: Dict[str, str]):
+        """Subscribe on a SEPARATE websocket so the NIFTY index feed is never restarted."""
+        self._instrument_type_map.update(type_map)
+        try:
+            from dhanhq import DhanContext, MarketFeed as DhanMarketFeed
+            ctx = DhanContext(self.client_id, self.access_token)
+            f = DhanMarketFeed(
+                ctx, instruments, version="v2",
+                on_message=self._on_message, on_connect=self._on_connect,
+                on_error=self._on_error, on_close=self._on_close,
+            )
+            f.start()
+            self._extra_feeds.append(f)
+            logger.info(f"📡 Extra feed started for {len(instruments)} instrument(s)")
+        except Exception as e:
+            logger.error(f"Failed to start extra feed: {e}")
+
+    def has_extra_feeds(self) -> bool:
+        return bool(self._extra_feeds)
+
+    def close_extra_feeds(self):
+        for f in self._extra_feeds:
+            try:
+                f.close_connection()
+            except Exception:
+                pass
+        self._extra_feeds = []
+        
     # Internal: SDK Feed Setup                                           #
     # ------------------------------------------------------------------ #
     def _start_dhan_feed(self):

@@ -102,6 +102,10 @@ class TradingWorker:
                         option_type=opt, quantity=db_p.quantity,
                         entry_price=db_p.entry_price, stop_loss=0.0)
                     pos.finalize_sl(0)       # safe 15-pt SL, marks SL as final
+                    if db_p.quantity < 130:
+                        pos.target_1_hit = True
+                        pos.stop_loss = pos.entry_price   # Already protected at breakeven
+                        logger.info(f"🔄 Restored position {pos.symbol} post-T1: SL locked at Breakeven (₹{pos.stop_loss})")
                     self.position_manager.add_position(pos)
                     if opt == "PE":
                         self._active_put_security_id = sec_id

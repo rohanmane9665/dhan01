@@ -117,7 +117,7 @@ class ExecutionEngine:
                 "transaction_type": signal.direction,
                 "quantity": signal.quantity,
                 "order_type": "MARKET",
-                "product_type": "INTRADAY",
+                "product_type": "MARGIN",
                 "price": 0.0,
                 "reference_price": signal.entry_reference
             }
@@ -220,7 +220,7 @@ class ExecutionEngine:
             "transaction_type": "SELL",
             "quantity": quantity,
             "order_type": "MARKET",
-            "product_type": "INTRADAY",
+            "product_type": "MARGIN",
             "price": 0.0,
             "reference_price": exit_price,
         }
@@ -293,7 +293,7 @@ class ExecutionEngine:
             "transaction_type": "SELL",
             "quantity": pos.quantity,
             "order_type": "MARKET",
-            "product_type": "INTRADAY",
+            "product_type": "MARGIN",
             "price": 0.0,
             "reference_price": exit_price,
         }

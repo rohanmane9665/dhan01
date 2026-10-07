@@ -27,6 +27,11 @@ class BrokerAdapter(ABC):
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         """Cancels an existing order."""
         pass
+        
+    @abstractmethod
+    async def get_order_by_id(self, order_id: str) -> Dict[str, Any]:
+        """Retrieves order status by ID."""
+        pass
 
     @abstractmethod
     async def get_positions(self) -> List[Dict[str, Any]]:

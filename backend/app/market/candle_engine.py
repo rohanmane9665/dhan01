@@ -65,8 +65,8 @@ class CandleEngine:
             # Candle boundary crossed! Complete existing candle
             completed_candle = dict(self.current_candle)
             self.candles.append(completed_candle)
-            if len(self.candles) > 100:
-                self.candles = self.candles[-100:]
+            if len(self.candles) > 1500:
+                self.candles = self.candles[-1500:]
 
             if self.on_candle_close:
                 try:

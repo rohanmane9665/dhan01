@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import time
 from app.core.redis import redis_client
-from typing import Dict, Any, Optional
 
 from app.adapter.base import BrokerAdapter
 from app.execution.position_manager import PositionManager, Position

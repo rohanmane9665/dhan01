@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+import time
 from app.core.redis import redis_client
 
 from app.adapter.base import BrokerAdapter
@@ -17,6 +18,18 @@ from app.database.repositories import (
 
 logger = logging.getLogger(__name__)
 
+PRODUCT_TYPE = "MARGIN"
+ENTRY_BUFFER = 0.01                # BUY limit = live price + 1%   (154 -> 155.55)
+EXIT_BUFFERS = (0.01, 0.03, 0.05)  # SELL limit = live price -1%, then -3%, then -5% on retries
+FILL_WAIT_SECONDS = 6              # wait this long for a fill, then cancel
+MIN_ENTRY_PRICE = 20               # existing rule: skip trade if fill < 20
+ENTRY_LOCK_SECONDS = 30            # blocks duplicate entries for the same symbol
+TICK = 0.05                        # NSE option tick size
+_TERMINAL_FAIL = ("REJECTED", "CANCELLED", "EXPIRED")
+
+def _tick(price: float) -> float:
+    """Round to a valid 0.05 tick."""
+    return round(round(price / TICK) * TICK, 2)
 
 class ExecutionEngine:
     """

@@ -63,6 +63,7 @@ class Position:
         # Max tracked level for trailing
         self.current_trail_level = 0
         self._t1_block_until = 0.0
+        self.t1_sold_qty = 0
 
     def finalize_sl(self, candle_low):
         if candle_low and candle_low > 0:

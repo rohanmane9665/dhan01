@@ -43,8 +43,8 @@ class ReconciliationService:
 
             # Map local active net positions
             local_map: Dict[str, int] = {}
-            for lp in local_positions:
-                local_map[lp.symbol] = lp.quantity # assuming symbol maps to sec_id in this context, or we should use symbol
+            for p in self.position_manager.get_active_positions():
+                local_map[str(p.security_id)] = p.quantity
 
             # Check 1: Unexpected broker position missing locally
             for sec_id, qty in broker_map.items():

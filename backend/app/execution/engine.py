@@ -22,6 +22,7 @@ PRODUCT_TYPE = "MARGIN"
 ENTRY_BUFFER = 0.01                # BUY limit = live price + 1%   (154 -> 155.55)
 EXIT_BUFFERS = (0.01, 0.02, 0.03)  # SELL limit = live price -1%, then -2%, then -3% on retries
 FILL_WAIT_SECONDS = 3              # wait this long for a fill, then cancel
+SELL_WAIT_SECONDS = 3              # wait per SELL attempt before cancel + retry
 MIN_ENTRY_PRICE = 20               # existing rule: skip trade if fill < 20
 ENTRY_LOCK_SECONDS = 30            # blocks duplicate entries for the same symbol
 TICK = 0.05                        # NSE option tick size
@@ -108,7 +109,17 @@ class ExecutionEngine:
         if filled < want_qty:
             logger.warning(f"Order {oid} PARTIALLY filled {filled}/{want_qty}")
         return {"ok": True, "filled_qty": filled, "avg_price": avg, "oid": oid, "reason": ""}
-
+    async def _live_price_rest(self, security_id: str, exchange_segment: str) -> float:
+        """Fresh LTP straight from Dhan REST. Returns 0.0 if unavailable."""
+        try:
+            from app.dhan.client import get_dhan_client
+            r = await get_dhan_client().ticker_data({exchange_segment: [int(security_id)]})
+            d = (r or {}).get("data", {})
+            d = d.get("data", d)
+            return float(d[exchange_segment][str(security_id)]["last_price"])
+        except Exception:
+            return 0.0
+            
     async def _sell_with_retry(self, security_id: str, exchange_segment: str, qty: int,
                                ref_price: float, tag: str) -> Dict[str, Any]:
         """SELL with LIMIT just below live price; cancel + retry wider if not filled."""
@@ -116,6 +127,10 @@ class ExecutionEngine:
         for i, buf in enumerate(EXIT_BUFFERS):
             if remaining <= 0:
                 break
+            if i > 0:   # retries: re-price off the current market, not the old tick
+                fresh = await self._live_price_rest(security_id, exchange_segment)
+                if fresh > 0:
+                    ref_price = fresh
             limit_price = _tick(max(ref_price * (1 - buf), TICK))
             payload = {
                 "order_id": f"{tag}_{i}",
@@ -238,6 +253,7 @@ class ExecutionEngine:
             # Not filled at all -> fail cleanly, NO position
             if r.get("unknown"):
                 logger.critical(f"Order {order_id} status unknown - may be filled at Dhan, check manually")
+            if r["filled_qty"] <= 0:
                 logger.error(f"Order {order_id} failed at broker: {r['reason']}")
                 await order_repo.update_status(order_id, "FAILED", r["oid"])
                 await sig_repo.update_status(sig_model.id, "REJECTED")

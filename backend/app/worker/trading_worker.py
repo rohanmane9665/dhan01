@@ -18,6 +18,8 @@ from app.strategies.nifty_breakout import NiftyBreakoutStrategy
 from app.reconciliation.service import ReconciliationService
 from app.scheduler.market_calendar import MarketCalendar
 from app.market.instruments import InstrumentManager
+from app.database.database import AsyncSessionLocal
+from app.database.repositories import PositionRepository
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -106,6 +108,8 @@ class TradingWorker:
                         pos.target_1_hit = True
                         pos.stop_loss = pos.entry_price   # Already protected at breakeven
                         logger.info(f"🔄 Restored position {pos.symbol} post-T1: SL locked at Breakeven (₹{pos.stop_loss})")
+                    pos.stop_loss = max(pos.stop_loss, float(db_p.current_sl or 0))
+                    pos.t1_sold_qty = max(0, 130 - db_p.quantity)
                     self.position_manager.add_position(pos)
                     if opt == "PE":
                         self._active_put_security_id = sec_id
@@ -452,6 +456,9 @@ class TradingWorker:
 
     async def _run_entry(self, index_price: float):
         try:
+            if self.reconciliation.safe_mode and getattr(settings, "TRADING_MODE", "PAPER") == "LIVE":
+                logger.error("SAFE_MODE active - entry blocked")
+                return
             await self._execute_put_breakout(index_price)
         except Exception as e:
             logger.error(f"Entry failed: {e}", exc_info=True)
@@ -573,10 +580,10 @@ class TradingWorker:
             pos.finalize_sl(low)
             logger.info(f"✅ SL finalized {pos.stop_loss:.2f} | 1R {pos.risk_diff:.2f} | T1 {pos.target_1:.2f}")
             
+  
     async def _monitor_positions(self, ltp: float, tick_type: str, security_id: str):
         now = datetime.now(IST)
         is_force_close_time = now.time() >= __import__('datetime').time(15, 10)
-
         for pos in self.position_manager.get_active_positions():
             if is_force_close_time:
                 logger.warning(f"⏰ Force closing position {pos.position_id} due to End of Day (15:10)")
@@ -585,18 +592,25 @@ class TradingWorker:
                 except Exception as e:
                     logger.error(f"Failed to force exit position {pos.position_id}: {e}")
                 continue
-                
+            old_sl = pos.stop_loss
             if pos.security_id == security_id and not pos.sl_finalized:
                 await self._try_finalize_sl(pos)
-
             if pos.security_id == security_id:
                 exit_reason = pos.update_price(ltp)
-                
+                if pos.stop_loss != old_sl:
+                    try:
+                        async with AsyncSessionLocal() as s:
+                            await PositionRepository(s).update_position(pos.position_id, {"current_sl": pos.stop_loss})
+                    except Exception as e:
+                        logger.error(f"Could not save SL for {pos.position_id}: {e}")
                 if exit_reason:
                     if exit_reason == "PARTIAL_EXIT":
-                        logger.info(f"Selling partial quantity (65) for position {pos.position_id}")
+                        want = max(0, 65 - pos.t1_sold_qty)
+                        if want == 0:
+                            continue
+                        logger.info(f"Selling partial quantity ({want}) for position {pos.position_id}")
                         try:
-                            res = await self.execution_engine.partial_close_position(pos.position_id, 65, ltp)
+                            res = await self.execution_engine.partial_close_position(pos.position_id, want, ltp)
                             if not isinstance(res, dict) or res.get("status") != "PARTIAL_CLOSED":
                                 raise RuntimeError(f"partial exit not filled: {res}")
                         except Exception as e:
@@ -610,6 +624,7 @@ class TradingWorker:
                             await self.execution_engine.close_position(pos.position_id, ltp)
                         except Exception as e:
                             logger.error(f"Failed to full exit position {pos.position_id}: {e}")
+                            
     async def _position_watchdog(self):
         """REST price fallback, reconnect on a silent feed, 45s no-price exit, option-feed cleanup."""
         last_ok = _time.time()

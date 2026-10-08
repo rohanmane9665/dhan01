@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 PRODUCT_TYPE = "MARGIN"
 ENTRY_BUFFER = 0.01                # BUY limit = live price + 1%   (154 -> 155.55)
-EXIT_BUFFERS = (0.01, 0.03, 0.05)  # SELL limit = live price -1%, then -3%, then -5% on retries
-FILL_WAIT_SECONDS = 6              # wait this long for a fill, then cancel
+EXIT_BUFFERS = (0.01, 0.02, 0.03)  # SELL limit = live price -1%, then -2%, then -3% on retries
+FILL_WAIT_SECONDS = 3              # wait this long for a fill, then cancel
 MIN_ENTRY_PRICE = 20               # existing rule: skip trade if fill < 20
 ENTRY_LOCK_SECONDS = 30            # blocks duplicate entries for the same symbol
 TICK = 0.05                        # NSE option tick size
@@ -43,12 +43,15 @@ class ExecutionEngine:
         self.broker = broker_adapter
         self.risk_manager = risk_manager
         self.position_manager = position_manager
+        self._exit_locks: Dict[str, asyncio.Lock] = {}
+        
         
     async def process_signal(self, signal: Signal, quantity: int = None) -> Dict[str, Any]:
         if quantity:
             signal.quantity = int(quantity)      # 130
         return await self.execute_signal(signal)
-    async def _submit_and_confirm(self, payload: Dict[str, Any], fallback_price: float) -> Dict[str, Any]:
+        
+    async def _submit_and_confirm(self, payload: Dict[str, Any], fallback_price: float, wait: Optional[float] = None) -> Dict[str, Any]:
         """Places ONE order, waits for the broker's final answer. Cancels it if still open."""
         want_qty = int(payload["quantity"])
         resp = await self.broker.place_order(payload)
@@ -64,7 +67,9 @@ class ExecutionEngine:
         # Live Dhan: poll the order status
         last: Dict[str, Any] = {}
         status = ""
-        deadline = time.monotonic() + FILL_WAIT_SECONDS
+        wait = FILL_WAIT_SECONDS if wait is None else wait
+        deadline = time.monotonic() + wait
+        
         while time.monotonic() < deadline:
             await asyncio.sleep(0.4)
             last = await self.broker.get_order_by_id(oid) or last
@@ -72,12 +77,27 @@ class ExecutionEngine:
             if status == "TRADED" or status in _TERMINAL_FAIL:
                 break
         if status != "TRADED" and status not in _TERMINAL_FAIL:
-            logger.warning(f"Order {oid} still {status or 'UNKNOWN'} after {FILL_WAIT_SECONDS}s - cancelling")
+            logger.warning(f"Order {oid} still {status or 'UNKNOWN'} after {wait}s - cancelling")
             await self.broker.cancel_order(oid)
             await asyncio.sleep(0.6)
             last = await self.broker.get_order_by_id(oid) or last
             status = str(last.get("orderStatus", "")).upper()
+            
+        if status != "TRADED" and status not in _TERMINAL_FAIL:
+            # cancel attempted but still no final status -> check the trade book
+            try:
+                tb = await self.broker.get_trade_book(oid)
+                q = sum(int(float(t.get("tradedQuantity", 0))) for t in tb)
+                if q > 0:
+                    px = sum(float(t.get("tradedPrice", 0)) * float(t.get("tradedQuantity", 0)) for t in tb) / q
+                    return {"ok": True, "filled_qty": q, "avg_price": px, "oid": oid, "reason": "", "unknown": False}
+            except Exception:
+                pass
+            return {"ok": False, "filled_qty": 0, "avg_price": 0.0, "oid": oid,
+                    "reason": "status_unknown", "unknown": True}
+
         filled = int(float(last.get("filledQty") or 0))
+  
         if status == "TRADED" and filled <= 0:
             filled = want_qty
         avg = float(last.get("averageTradedPrice") or last.get("tradedPrice") or 0.0) or float(fallback_price or 0.0)
@@ -110,8 +130,12 @@ class ExecutionEngine:
                 "reference_price": ref_price,
             }
             logger.info(f"SELL attempt {i + 1}/{len(EXIT_BUFFERS)}: {remaining} x {security_id} LIMIT {limit_price} (live {ref_price})")
-            r = await self._submit_and_confirm(payload, ref_price)
+            r = await self._submit_and_confirm(payload, ref_price, wait=SELL_WAIT_SECONDS)
             last_oid, last_reason = r["oid"] or last_oid, r["reason"]
+            if r.get("unknown"):
+                logger.critical(f"Order {r['oid']} status unknown - NOT retrying, check Dhan manually")
+                break
+          
             if r["filled_qty"] > 0:
                 total_qty += r["filled_qty"]
                 total_val += r["avg_price"] * r["filled_qty"]
@@ -140,6 +164,9 @@ class ExecutionEngine:
         if not signal.entry_reference or signal.entry_reference <= 0:
             logger.error(f"Order {order_id} aborted: no live price for {signal.symbol}")
             return {"order_id": order_id, "status": "REJECTED", "reason": "no_live_price"}
+        if signal.entry_reference < MIN_ENTRY_PRICE:
+            return {"order_id": order_id, "status": "REJECTED", "reason": "price_below_min"}
+            
         # duplicate guard (two workers / double signals)
         lock_key = f"entry_lock:{signal.symbol}"
         if not await redis_client.set(lock_key, "1", nx=True, ex=ENTRY_LOCK_SECONDS):
@@ -209,13 +236,15 @@ class ExecutionEngine:
             logger.info(f"Submitting Order {order_id} ({signal.symbol}) BUY {signal.quantity} LIMIT {limit_price} (live {signal.entry_reference})")
             r = await self._submit_and_confirm(order_payload, signal.entry_reference)
             # Not filled at all -> fail cleanly, NO position
-            if r["filled_qty"] <= 0:
+            if r.get("unknown"):
+                logger.critical(f"Order {order_id} status unknown - may be filled at Dhan, check manually")
                 logger.error(f"Order {order_id} failed at broker: {r['reason']}")
                 await order_repo.update_status(order_id, "FAILED", r["oid"])
                 await sig_repo.update_status(sig_model.id, "REJECTED")
                 await event_repo.log_system_event("ORDER_FAILED", "ERROR", f"Order {order_id} failed: {r['reason']}")
                 return {"order_id": order_id, "status": "FAILED", "reason": r["reason"]}
             filled_qty, fill_price = r["filled_qty"], r["avg_price"]
+            
             # Partial entry fill or price below minimum -> sell back, skip trade
             if filled_qty < signal.quantity or fill_price < MIN_ENTRY_PRICE:
                 why = "partial_fill" if filled_qty < signal.quantity else "fill_price_below_20"
@@ -267,8 +296,24 @@ class ExecutionEngine:
                 "traded_price": fill_price,
                 "position_id": pos_id
             }
+    def _lock_for(self, position_id: str) -> asyncio.Lock:
+        return self._exit_locks.setdefault(position_id, asyncio.Lock())
+
+    async def close_position(self, position_id: str, exit_price: float):
+        lock = self._lock_for(position_id)
+        if lock.locked():
+            return {"status": "SKIPPED", "reason": "exit_in_progress"}
+        async with lock:
+            return await self._close_locked(position_id, exit_price)
+
+    async def partial_close_position(self, position_id: str, quantity: int, exit_price: float):
+        lock = self._lock_for(position_id)
+        if lock.locked():
+            return {"status": "SKIPPED", "reason": "exit_in_progress"}
+        async with lock:
+            return await self._partial_close_locked(position_id, quantity, exit_price)
             
-    async def partial_close_position(self, position_id: str, quantity: int, exit_price: float) -> Dict[str, Any]:
+    async def _partial_close_locked(self, position_id: str, quantity: int, exit_price: float) -> Dict[str, Any]:
         pos = self.position_manager.active_positions.get(position_id)
         if not pos or pos.quantity < quantity:
             return {"status": "ERROR", "reason": f"Position {position_id} not found or insufficient quantity"}
@@ -299,13 +344,14 @@ class ExecutionEngine:
                 "side": "SELL", "quantity": filled, "price": fill_price
             })
             self.position_manager.partial_close(position_id, filled, fill_price)
+            pos.t1_sold_qty += filled
             await pos_repo.update_position(position_id, {"quantity": pos.quantity})
             await event_repo.log_system_event("POSITION_PARTIAL_CLOSED", "INFO", f"Sold {filled} of {position_id} at {fill_price}")
             if filled < quantity:
                 return {"order_id": order_id, "status": "FAILED", "reason": f"only {filled}/{quantity} sold"}
             return {"order_id": order_id, "status": "PARTIAL_CLOSED", "traded_price": fill_price}
             
-    async def close_position(self, position_id: str, exit_price: float) -> Dict[str, Any]:
+    async def _close_locked(self, position_id: str, exit_price: float) -> Dict[str, Any]:
         pos = self.position_manager.active_positions.get(position_id)
         if not pos:
             return {"status": "ERROR", "reason": f"Position {position_id} not found"}

@@ -273,16 +273,7 @@ class ExecutionEngine:
                     await event_repo.log_system_event("ORPHAN_QTY", "CRITICAL", f"{left} x {signal.symbol} held after failed sell-back")
                 await order_repo.update_status(order_id, "REJECTED", r["oid"])
                 return {"order_id": order_id, "status": "REJECTED", "reason": why}
-            # Full fill -> open position with the REAL fill price
-            await order_repo.update_status(order_id, "FILLED", r["oid"])
-            await trade_repo.create_trade({
-                "id": f"TRD_{uuid.uuid4().hex[:8].upper()}",
-                "order_id": order_id,
-                "symbol": signal.symbol,
-                "side": signal.direction,
-                "quantity": filled_qty,
-                "price": fill_price
-            })
+            # Full fill -> track the position IN MEMORY FIRST (it is live at the broker now)
             pos_id = f"POS_{uuid.uuid4().hex[:8].upper()}"
             position = Position(
                 position_id=pos_id,
@@ -295,16 +286,28 @@ class ExecutionEngine:
                 strategy_id=signal.strategy_id
             )
             self.position_manager.add_position(position)
-            await pos_repo.create_position({
+            self.risk_manager.record_trade_execution()
+
+            # DB writes are best-effort from here: a DB error must never leave a live position unmanaged
+            await self._db("order FILLED", order_repo.update_status(order_id, "FILLED", r["oid"]))
+            await self._db("trade", trade_repo.create_trade({
+                "id": f"TRD_{uuid.uuid4().hex[:8].upper()}",
+                "order_id": order_id,
+                "symbol": signal.symbol,
+                "side": signal.direction,
+                "quantity": filled_qty,
+                "price": fill_price
+            }))
+            await self._db("position", pos_repo.create_position({
                 "id": pos_id,
                 "symbol": signal.symbol,
                 "quantity": filled_qty,
                 "entry_price": fill_price,
                 "current_sl": signal.stop_loss_reference,
                 "status": "OPEN"
-            })
-            self.risk_manager.record_trade_execution()
-            await event_repo.log_system_event("POSITION_OPENED", "INFO", f"Opened {pos_id} for {signal.symbol} at {fill_price}")
+            }))
+            await self._db("event", event_repo.log_system_event("POSITION_OPENED", "INFO", f"Opened {pos_id} for {signal.symbol} at {fill_price}"))
+
             return {
                 "order_id": order_id,
                 "broker_order_id": r["oid"],
@@ -312,9 +315,19 @@ class ExecutionEngine:
                 "traded_price": fill_price,
                 "position_id": pos_id
             }
+
+    
+    async def _db(self, label: str, coro):
+        """DB write that must NEVER break trading. Errors are logged and ignored."""
+        try:
+            return await coro
+        except Exception as e:
+            logger.error(f"DB write failed ({label}): {e}")
+            return None
+            
     def _lock_for(self, position_id: str) -> asyncio.Lock:
         return self._exit_locks.setdefault(position_id, asyncio.Lock())
-
+        
     async def close_position(self, position_id: str, exit_price: float):
         lock = self._lock_for(position_id)
         if lock.locked():
@@ -344,29 +357,35 @@ class ExecutionEngine:
             pos_repo = PositionRepository(session)
             trade_repo = TradeRepository(session)
             event_repo = EventRepository(session)
-            await order_repo.create_order({
+            
+            # DB is best-effort: it must NEVER stop an exit order from being sent
+            await self._db("exit order", order_repo.create_order({
                 "id": order_id, "symbol": pos.symbol, "side": "SELL", "quantity": quantity,
                 "order_type": "LIMIT", "price": _tick(ref * (1 - EXIT_BUFFERS[0])), "status": "PENDING"
-            })
+            }))
             sell = await self._sell_with_retry(pos.security_id, exchange_segment, quantity, ref, order_id)
             if sell["filled_qty"] <= 0:
-                await order_repo.update_status(order_id, "FAILED", sell["oid"])
-                await event_repo.log_system_event("ORDER_FAILED", "ERROR", f"Partial exit {order_id} failed: {sell['reason']}")
+                await self._db("order FAILED", order_repo.update_status(order_id, "FAILED", sell["oid"]))
+                await self._db("event", event_repo.log_system_event("ORDER_FAILED", "ERROR", f"Partial exit {order_id} failed: {sell['reason']}"))
                 return {"order_id": order_id, "status": "FAILED", "reason": sell["reason"]}
             filled, fill_price = sell["filled_qty"], sell["avg_price"]
-            await order_repo.update_status(order_id, "FILLED", sell["oid"])
-            await trade_repo.create_trade({
-                "id": f"TRD_{uuid.uuid4().hex[:8].upper()}", "order_id": order_id, "symbol": pos.symbol,
-                "side": "SELL", "quantity": filled, "price": fill_price
-            })
+            
+            # Update memory FIRST (the shares are already sold at the broker)
             self.position_manager.partial_close(position_id, filled, fill_price)
             pos.t1_sold_qty += filled
-            await pos_repo.update_position(position_id, {"quantity": pos.quantity})
-            await event_repo.log_system_event("POSITION_PARTIAL_CLOSED", "INFO", f"Sold {filled} of {position_id} at {fill_price}")
+            
+            await self._db("order FILLED", order_repo.update_status(order_id, "FILLED", sell["oid"]))
+            await self._db("trade", trade_repo.create_trade({
+                "id": f"TRD_{uuid.uuid4().hex[:8].upper()}", "order_id": order_id, "symbol": pos.symbol,
+                "side": "SELL", "quantity": filled, "price": fill_price
+            }))
+            await self._db("position qty", pos_repo.update_position(position_id, {"quantity": pos.quantity}))
+            await self._db("event", event_repo.log_system_event("POSITION_PARTIAL_CLOSED", "INFO", f"Sold {filled} of {position_id} at {fill_price}"))
+            
             if filled < quantity:
                 return {"order_id": order_id, "status": "FAILED", "reason": f"only {filled}/{quantity} sold"}
             return {"order_id": order_id, "status": "PARTIAL_CLOSED", "traded_price": fill_price}
-            
+
     async def _close_locked(self, position_id: str, exit_price: float) -> Dict[str, Any]:
         pos = self.position_manager.active_positions.get(position_id)
         if not pos:
@@ -383,37 +402,49 @@ class ExecutionEngine:
             pos_repo = PositionRepository(session)
             trade_repo = TradeRepository(session)
             event_repo = EventRepository(session)
-            await order_repo.create_order({
+            
+            # DB is best-effort: it must NEVER stop an exit order from being sent
+            await self._db("exit order", order_repo.create_order({
                 "id": order_id, "symbol": pos.symbol, "side": "SELL", "quantity": qty,
                 "order_type": "LIMIT", "price": _tick(ref * (1 - EXIT_BUFFERS[0])), "status": "PENDING"
-            })
+            }))
             sell = await self._sell_with_retry(pos.security_id, exchange_segment, qty, ref, order_id)
             if sell["filled_qty"] <= 0:
-                await order_repo.update_status(order_id, "FAILED", sell["oid"])
-                await event_repo.log_system_event("ORDER_FAILED", "ERROR", f"Exit {order_id} failed: {sell['reason']}")
+                await self._db("order FAILED", order_repo.update_status(order_id, "FAILED", sell["oid"]))
+                await self._db("event", event_repo.log_system_event("ORDER_FAILED", "ERROR", f"Exit {order_id} failed: {sell['reason']}"))
                 logger.error(f"Exit {order_id} failed ({sell['reason']}) - position stays open, will retry on next tick")
                 return {"order_id": order_id, "status": "FAILED", "reason": sell["reason"]}
             filled, fill_price = sell["filled_qty"], sell["avg_price"]
-            await order_repo.update_status(order_id, "FILLED", sell["oid"])
-            await trade_repo.create_trade({
-                "id": f"TRD_{uuid.uuid4().hex[:8].upper()}", "order_id": order_id, "symbol": pos.symbol,
-                "side": "SELL", "quantity": filled, "price": fill_price
-            })
+            
             if filled < qty:
-                # Only part sold: keep position open with remaining qty; next tick retries
+                # Only part sold: update memory first, keep position open with the rest; next tick retries
                 self.position_manager.partial_close(position_id, filled, fill_price)
-                await pos_repo.update_position(position_id, {"quantity": pos.quantity})
+                await self._db("order FILLED", order_repo.update_status(order_id, "FILLED", sell["oid"]))
+                await self._db("trade", trade_repo.create_trade({
+                    "id": f"TRD_{uuid.uuid4().hex[:8].upper()}", "order_id": order_id, "symbol": pos.symbol,
+                    "side": "SELL", "quantity": filled, "price": fill_price
+                }))
+                await self._db("position qty", pos_repo.update_position(position_id, {"quantity": pos.quantity}))
                 logger.error(f"Exit only {filled}/{qty} sold - {pos.quantity} still open, will retry")
                 return {"order_id": order_id, "status": "FAILED", "reason": f"only {filled}/{qty} sold"}
+            
+            # Fully sold: update memory FIRST so the position can never be sold twice
             closed = self.position_manager.close_position(position_id, fill_price)
             if closed:
                 self.risk_manager.record_position_closed(closed.realized_pnl)
-            await pos_repo.update_position(position_id, {
+            
+            await self._db("order FILLED", order_repo.update_status(order_id, "FILLED", sell["oid"]))
+            await self._db("trade", trade_repo.create_trade({
+                "id": f"TRD_{uuid.uuid4().hex[:8].upper()}", "order_id": order_id, "symbol": pos.symbol,
+                "side": "SELL", "quantity": filled, "price": fill_price
+            }))
+            await self._db("position closed", pos_repo.update_position(position_id, {
                 "status": "CLOSED",
                 "closed_at": datetime.now(timezone.utc),
                 "pnl": closed.realized_pnl if closed else 0.0
-            })
-            await event_repo.log_system_event("POSITION_CLOSED", "INFO", f"Closed {position_id} at {fill_price}")
+            }))
+            await self._db("event", event_repo.log_system_event("POSITION_CLOSED", "INFO", f"Closed {position_id} at {fill_price}"))
+            
             return {
                 "order_id": order_id,
                 "status": "CLOSED",

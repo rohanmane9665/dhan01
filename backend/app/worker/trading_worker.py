@@ -76,9 +76,19 @@ class TradingWorker:
         self._running = True
 
         connected = await self.broker.connect()
+        is_live = str(getattr(settings, "TRADING_MODE", "PAPER")).upper() == "LIVE"
         if not connected:
+            if is_live:
+                raise RuntimeError("LIVE broker failed to connect - check DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN. Worker stopped.")
             logger.warning("Broker adapter failed to connect. Worker will retry ticks without live execution.")
-
+        elif is_live:
+            from app.dhan.client import get_dhan_client
+            funds = await get_dhan_client().get_fund_limits()
+            if not isinstance(funds, dict) or funds.get("status") != "success":
+                raise RuntimeError(f"LIVE startup check failed - Dhan rejected the request (expired token?): {funds}")
+            fd = funds.get("data") or {}
+            logger.info(f"💰 Dhan OK. Available balance: {fd.get('availabelBalance', fd.get('availableBalance'))}")
+       
         from app.database.database import AsyncSessionLocal
         from app.database.repositories import PositionRepository
         from app.execution.position_manager import Position
